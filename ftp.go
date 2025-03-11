@@ -53,3 +53,22 @@ func ParseFTP(buf, viewSecretKey []byte) (*FinalizeTxParam, error) {
 	}
 	return res, nil
 }
+
+type ftpSrcSorter struct {
+	tx  *zanobase.Transaction
+	ftp *FinalizeTxParam
+}
+
+func (res *ftpSrcSorter) Len() int {
+	return len(res.tx.Vin)
+}
+
+func (res *ftpSrcSorter) Less(a, b int) bool {
+	// TODO handle other types
+	return bytes.Compare(res.tx.Vin[a].Value.(*zanobase.TxInZcInput).KeyImage.Bytes(), res.tx.Vin[b].Value.(*zanobase.TxInZcInput).KeyImage.Bytes()) < 0
+}
+
+func (res *ftpSrcSorter) Swap(a, b int) {
+	res.tx.Vin[a], res.tx.Vin[b] = res.tx.Vin[b], res.tx.Vin[a]
+	res.ftp.Sources[a], res.ftp.Sources[b] = res.ftp.Sources[b], res.ftp.Sources[a]
+}

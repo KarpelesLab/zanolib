@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sort"
 
 	"filippo.io/edwards25519"
 	"github.com/ModChain/zanolib/zanobase"
@@ -30,8 +31,12 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 	tx := &zanobase.Transaction{Version: 2}
 	res := &FinalizedTx{
 		Tx:  tx,
-		FTP: ftp,
+		FTP: new(FinalizeTxParam),
 	}
+	// make sure res.FTP unaffected by sources reordering locally
+	*res.FTP = *ftp
+	res.FTP.Sources = slices.Clone(res.FTP.Sources)
+
 	ogc := &zanobase.GenContext{
 		AoAmountBlindingMask: &zanobase.Scalar{zanocrypto.ScalarInt(0)},
 	}
@@ -144,7 +149,6 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 		}
 
 		// store derivation hint into the tx
-		// TODO do not insert if duplicate
 		hint := zanocrypto.DerivationHint(derivation)
 		hints[hint] = true
 
@@ -184,6 +188,19 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 		tx.Vout = append(tx.Vout, zanobase.VariantFor(vout))
 	}
 
+	for len(hints) < len(tx.Vout) {
+		// add_random_derivation_hints_and_put_them_to_tx
+		// uint16_t hint = crypto::rand<uint16_t>()
+		var rndHint [2]byte
+		_, err := io.ReadFull(rnd, rndHint[:])
+		if err != nil {
+			return nil, err
+		}
+		rndHintV := binary.LittleEndian.Uint16(rndHint[:])
+		rndHintV = 0x79ef - 1
+		hints[rndHintV+uint16(len(hints))] = true // add +len(hints) so we don't loop to infinity if using a fixed rndreader
+	}
+
 	hintsArray := make([]uint16, 0, len(hints))
 	for hint := range hints {
 		hintsArray = append(hintsArray, hint)
@@ -202,6 +219,11 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 	for _, dst := range ftp.PreparedDestinations {
 		totalOut += dst.Amount
 	}
+
+	// sort tx.Vin & ftp.Sources by Vin.KeyImage
+	// duplicate ftp
+	sort.Sort(&ftpSrcSorter{tx, ftp})
+
 	if totalIn > totalOut {
 		// add fee to extras
 		tx.Extra = append(tx.Extra, &zanobase.Variant{Tag: zanobase.TagZarcaniumTxDataV1, Value: &zanobase.ZarcaniumTxDataV1{Fee: totalIn - totalOut}})
