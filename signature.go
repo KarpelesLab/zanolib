@@ -197,7 +197,6 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 			return nil, err
 		}
 		rndHintV := binary.LittleEndian.Uint16(rndHint[:])
-		rndHintV = 0x79ef - 1
 		hints[rndHintV+uint16(len(hints))] = true // add +len(hints) so we don't loop to infinity if using a fixed rndreader
 	}
 
