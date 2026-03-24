@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/ModChain/base58"
+	"github.com/KarpelesLab/base58"
 	"github.com/KarpelesLab/zanolib"
 )
 

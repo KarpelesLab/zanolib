@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ModChain/base58"
+	"github.com/KarpelesLab/base58"
 	"github.com/KarpelesLab/zanolib/zanobase"
 	"golang.org/x/crypto/sha3"
 )
