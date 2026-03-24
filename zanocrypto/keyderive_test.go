@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanocrypto"
+	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
 func TestGenerateKeyDerivation(t *testing.T) {

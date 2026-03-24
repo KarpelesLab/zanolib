@@ -6,8 +6,8 @@ import (
 	"io"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
-	"github.com/ModChain/zanolib/zanocrypto"
+	"github.com/KarpelesLab/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
 func GenerateAssetSurjectionProof(rnd io.Reader, tx *zanobase.Transaction, contextHash []byte, ogc *zanobase.GenContext) error {

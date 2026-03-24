@@ -5,8 +5,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/ModChain/zanolib/zanobase"
-	"github.com/ModChain/zanolib/zanocrypto"
+	"github.com/KarpelesLab/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
 type FinalizeTxParam struct {

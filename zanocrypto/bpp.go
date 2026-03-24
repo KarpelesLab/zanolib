@@ -4,7 +4,7 @@ import (
 	"io"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
 // CT = crypto trait

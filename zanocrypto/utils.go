@@ -4,7 +4,7 @@ import (
 	"reflect"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
 func load3(in []byte) int64 {

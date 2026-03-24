@@ -3,7 +3,7 @@ package zanobase_test
 import (
 	"testing"
 
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
 func TestVarint(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
 func DerivePublicKey(derivation []byte, outputIndex uint64, basePublic *edwards25519.Point) (*edwards25519.Point, error) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ModChain/zanolib/zanocrypto"
+	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
 func TestHashToEC(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/ModChain/base58"
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 	"golang.org/x/crypto/sha3"
 )
 

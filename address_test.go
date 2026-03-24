@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/ModChain/base58"
-	"github.com/ModChain/zanolib"
+	"github.com/KarpelesLab/zanolib"
 )
 
 type addressTestVector struct {

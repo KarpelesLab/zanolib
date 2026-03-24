@@ -1,4 +1,4 @@
-module github.com/ModChain/zanolib
+module github.com/KarpelesLab/zanolib
 
 go 1.23.1
 

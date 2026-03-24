@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
 func GenerateVectorUgAggregationProof(rnd io.Reader, contextHash []byte, uSecrets, gSecrets0, gSecrets1 []*edwards25519.Scalar, amountCommitments, amountCommitmentsForRpAggregation, blindedAssetIds []*edwards25519.Point) (*zanobase.UGAggProof, error) {

@@ -4,8 +4,8 @@ import (
 	"slices"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
-	"github.com/ModChain/zanolib/zanocrypto"
+	"github.com/KarpelesLab/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
 type TxDestHtlcOut struct {

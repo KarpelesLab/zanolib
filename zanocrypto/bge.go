@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
 // src/crypto/one_out_of_many_proofs.cpp

@@ -10,9 +10,9 @@ import (
 	"sort"
 
 	"filippo.io/edwards25519"
-	"github.com/ModChain/zanolib/zanobase"
-	"github.com/ModChain/zanolib/zanocrypto"
-	"github.com/ModChain/zanolib/zanoproof"
+	"github.com/KarpelesLab/zanolib/zanobase"
+	"github.com/KarpelesLab/zanolib/zanocrypto"
+	"github.com/KarpelesLab/zanolib/zanoproof"
 )
 
 var (
