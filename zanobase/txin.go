@@ -1,9 +1,12 @@
 package zanobase
 
+// TxInGen represents a coinbase (generation) transaction input.
 type TxInGen struct {
 	Height uint64
 }
 
+// TxInZcInput represents a zero-confidential transaction input with ring
+// member key offsets and a key image for double-spend prevention.
 type TxInZcInput struct {
 	// referring_input
 	KeyOffsets []*Payload `json:"key_offsets"` // std::vector<txout_ref_v>; typedef boost::variant<uint64_t, ref_by_id> txout_ref_v

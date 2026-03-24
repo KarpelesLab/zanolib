@@ -10,6 +10,9 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// GenerateTxBalanceProof generates a balance proof showing that the transaction's
+// inputs and outputs are balanced (inputs = outputs + fee). The proof is
+// appended to tx.Proofs.
 func GenerateTxBalanceProof(rnd io.Reader, tx *zanobase.Transaction, contextHash []byte, ogc *zanobase.GenContext, block_reward_for_miner_tx uint64) error {
 	// generate_tx_balance_proof(const transaction &tx, const crypto::hash& tx_id, const tx_generation_context& ogc,
 	res := new(zanobase.ZCBalanceProof)

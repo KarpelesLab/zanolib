@@ -12,6 +12,8 @@ import (
 // template<typename gen_trait_t, size_t N = 64, size_t values_max = 32>
 // src/crypto/range_proof_bpp.h
 
+// BPPGen generates a Bulletproof+ range proof for the given values and masks.
+// The commitments_1div8 are the pre-computed Pedersen commitments (pre-multiplied by 1/8).
 func (trait *Trait) BPPGen(rnd io.Reader, values, masks []*edwards25519.Scalar, commitments_1div8 []*edwards25519.Point) (*zanobase.BPPSignature, error) {
 	// Note: commitments_1div8 are supposed to be already calculated
 

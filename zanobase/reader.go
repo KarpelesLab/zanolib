@@ -7,6 +7,8 @@ import (
 	"github.com/KarpelesLab/rc"
 )
 
+// ReadVarBytes reads a varint-prefixed byte slice from r.
+// The maximum length is 4096 bytes.
 func ReadVarBytes(r io.Reader) ([]byte, error) {
 	rc := rc.New(r)
 	ln, err := VarintReadUint64(rc)
@@ -24,6 +26,8 @@ func ReadVarBytes(r io.Reader) ([]byte, error) {
 	return buf, nil
 }
 
+// ReadVec32 reads a varint-prefixed array of [Value256] from r.
+// The maximum count is 128 elements.
 func ReadVec32(r io.Reader) ([]Value256, error) {
 	rc := rc.New(r)
 	ln, err := VarintReadUint64(rc)

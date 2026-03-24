@@ -7,12 +7,16 @@ import (
 	"github.com/KarpelesLab/rc"
 )
 
+// Varint is a variable-length encoded unsigned integer, compatible with the
+// varint format used by Zano/CryptoNote.
 type Varint uint64
 
+// Bytes returns the varint-encoded representation.
 func (v Varint) Bytes() []byte {
 	return VarintAppendUint64(nil, uint64(v))
 }
 
+// ReadFrom reads a varint from r.
 func (v *Varint) ReadFrom(r io.Reader) (int64, error) {
 	rc := rc.New(r)
 	n, err := VarintReadUint64(rc)
@@ -23,6 +27,7 @@ func (v *Varint) ReadFrom(r io.Reader) (int64, error) {
 	return rc.Ret64()
 }
 
+// VarintPackedSize returns the number of bytes needed to encode v as a varint.
 func VarintPackedSize(v uint64) int {
 	switch {
 	case v <= 0x7f:
@@ -44,6 +49,7 @@ func VarintPackedSize(v uint64) int {
 	}
 }
 
+// VarintAppendUint64 appends the varint encoding of v to buf and returns the result.
 func VarintAppendUint64(buf []byte, v uint64) []byte {
 	for v > 0x80 {
 		buf = append(buf, byte(v&0x7f)|0x80)
@@ -53,6 +59,8 @@ func VarintAppendUint64(buf []byte, v uint64) []byte {
 	return buf
 }
 
+// VarintTakeUint64 decodes a varint from the start of buf and returns
+// the remaining bytes, the decoded value, and any error.
 func VarintTakeUint64(buf []byte) ([]byte, uint64, error) {
 	var v uint64
 	var offt int
@@ -68,6 +76,7 @@ func VarintTakeUint64(buf []byte) ([]byte, uint64, error) {
 	return buf[1:], v, nil
 }
 
+// VarintReadUint64 reads and decodes a varint from r.
 func VarintReadUint64(r io.ByteReader) (uint64, error) {
 	var v uint64
 	var offt int

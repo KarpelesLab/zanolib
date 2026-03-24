@@ -7,6 +7,8 @@ import (
 	"filippo.io/edwards25519"
 )
 
+// Trait defines the cryptographic parameters for Bulletproof+ generation,
+// including the generators and dimension constraints.
 type Trait struct {
 	Type      string // UGX or HGX
 	N         int
@@ -52,6 +54,8 @@ func makeTrait(typ string, N, valuesMax int) *Trait {
 	return res
 }
 
+// CalcPedersenCommitment computes a Pedersen commitment: value * G + mask * H,
+// using this trait's generators.
 func (t *Trait) CalcPedersenCommitment(value, mask *edwards25519.Scalar) *edwards25519.Point {
 	// commitment = value * bpp_G + mask * bpp_H
 	a := new(edwards25519.Point).ScalarMult(value, t.G)
@@ -64,16 +68,22 @@ func (t *Trait) at(row, col int) int {
 	return row*t.N + col
 }
 
+// TraitInitialTranscript returns the initial Fiat-Shamir transcript scalar
+// for Bulletproof+ generation.
 func TraitInitialTranscript() *edwards25519.Scalar {
 	return HashToScalar([]byte("Zano BP+ initial transcript"))
 }
 
+// TraitUpdateTranscript updates the Fiat-Shamir transcript by hashing the
+// current transcript value and public keys.
 func TraitUpdateTranscript(hsc *HashHelper, e *edwards25519.Scalar, pubKeys []*edwards25519.Point) *edwards25519.Scalar {
 	hsc.Add(e)
 	hsc.Add(bter(pubKeys)...)
 	return hsc.CalcHash()
 }
 
+// TraitGetGenerator returns the Bulletproof+ generator point at the given
+// index. If select_H is true, returns the H-generator; otherwise the G-generator.
 func TraitGetGenerator(select_H bool, index int) *edwards25519.Point {
 	// simple method
 	// TODO pre-generate?

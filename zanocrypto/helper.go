@@ -7,7 +7,7 @@ import (
 	"filippo.io/edwards25519/field"
 )
 
-// FeToBytes marshals h to s.
+// FeToBytes marshals a field element h (in radix-2^25.5 representation) to 32 bytes s.
 // Preconditions:
 //
 //	|h| bounded by 1.1*2^25,1.1*2^24,1.1*2^25,1.1*2^24,etc.
@@ -121,6 +121,7 @@ func FeToBytes[T ~int32 | ~int64](s *[32]byte, h *[10]T) {
 	s[31] = byte(h[9] >> 18)
 }
 
+// FieldFromInt10 creates a field.Element from a 10-limb radix-2^25.5 representation.
 func FieldFromInt10[T ~int32 | ~int64](f [10]T) (*field.Element, error) {
 	fe := new(field.Element)
 	var b [32]byte
@@ -128,6 +129,7 @@ func FieldFromInt10[T ~int32 | ~int64](f [10]T) (*field.Element, error) {
 	return fe.SetBytes(b[:])
 }
 
+// ScalarInt converts a uint64 value to an Edwards25519 scalar.
 func ScalarInt(v uint64) *edwards25519.Scalar {
 	var b [32]byte
 	binary.LittleEndian.PutUint64(b[:8], v)
@@ -135,7 +137,7 @@ func ScalarInt(v uint64) *edwards25519.Scalar {
 	return r
 }
 
-// FeDivPowM1 sets u = z / y * (z / y)^((p-5)/8) in the field GF(2^255 - 19),
+// FeDivPowM1 computes u = z / y * (z / y)^((p-5)/8) in the field GF(2^255 - 19),
 // following the "ref10" formula:
 //
 //	t1 = 1 / y

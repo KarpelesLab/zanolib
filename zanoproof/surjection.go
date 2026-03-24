@@ -10,6 +10,9 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// GenerateAssetSurjectionProof generates an asset surjection proof for each
+// output, proving that its asset type matches one of the input asset types
+// without revealing which one. The proof is appended to tx.Proofs.
 func GenerateAssetSurjectionProof(rnd io.Reader, tx *zanobase.Transaction, contextHash []byte, ogc *zanobase.GenContext) error {
 	outsCount := len(ogc.BlindedAssetIds)
 	if outsCount == 0 {

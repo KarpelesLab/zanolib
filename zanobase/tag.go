@@ -2,6 +2,8 @@ package zanobase
 
 import "reflect"
 
+// Tag is an 8-bit discriminator used to identify the concrete type stored
+// in a [Variant]. Each tag value maps to a specific Go type.
 type Tag uint8
 
 type tagDefinition struct {
@@ -62,6 +64,7 @@ func init() {
 	defTag[*ZCBalanceProof](TagZcBalanceProof, "zc_balance_proof")
 }
 
+// TagFor returns the [Tag] registered for type T, or 0xff if T is not registered.
 func TagFor[T any]() Tag {
 	t := reflect.TypeFor[T]()
 	if tag, ok := tagTypeLookup[t]; ok {
@@ -70,6 +73,8 @@ func TagFor[T any]() Tag {
 	return Tag(0xff)
 }
 
+// New creates a new zero-value instance of the type registered for this tag.
+// Panics if the tag is not registered.
 func (t Tag) New() any {
 	def, ok := variantTags[t]
 	if !ok {
@@ -78,6 +83,8 @@ func (t Tag) New() any {
 	return reflect.New(def.typ).Elem().Interface()
 }
 
+// Type returns the reflect.Type registered for this tag.
+// Panics if the tag is not registered.
 func (t Tag) Type() reflect.Type {
 	def, ok := variantTags[t]
 	if !ok {

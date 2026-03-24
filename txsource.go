@@ -8,6 +8,8 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// TxSourceOutputEntry represents a single output reference within a
+// transaction source, including its stealth address and commitment data.
 type TxSourceOutputEntry struct {
 	OutReference     *zanobase.Variant // TxOutRef // either global output index or ref_by_id
 	StealthAddress   *zanobase.Point   // crypto::public_key, a.k.a output's one-time public key
@@ -16,6 +18,8 @@ type TxSourceOutputEntry struct {
 	BlindedAssetID   *zanobase.Point   // only for ZC outputs
 }
 
+// TxSource represents a transaction input source with ring members,
+// the real output index, blinding masks, and amount information.
 type TxSource struct {
 	Outputs                    []*TxSourceOutputEntry
 	RealOutput                 uint64
@@ -33,6 +37,8 @@ type TxSource struct {
 	ephemeral                  *zanobase.KeyPair
 }
 
+// IsZC returns true if this source is a zero-confidential (ZC) input,
+// determined by checking whether the asset ID blinding mask is non-zero.
 func (src *TxSource) IsZC() bool {
 	//return !real_out_amount_blinding_mask.is_zero()
 	return src.RealOutAssetIdBlindingMask.Scalar.Equal(zanocrypto.ScZero) == 0

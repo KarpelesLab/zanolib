@@ -10,6 +10,8 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+// Wallet holds the key material for a Zano wallet, including both spend and
+// view key pairs. It is typically created via [LoadSpendSecret].
 type Wallet struct {
 	SpendPrivKey *edwards25519.Scalar
 	SpendPubKey  *edwards25519.Point
@@ -73,12 +75,16 @@ func (w *Wallet) Address() *Address {
 	return addr
 }
 
+// ParseFTP decrypts and deserializes a finalize transaction parameter blob
+// using this wallet's view private key.
 func (w *Wallet) ParseFTP(buf []byte) (*FinalizeTxParam, error) {
 	// buf is encrypted using chacha8 xor initialized with the view private key
 	key := w.ViewPrivKey.Bytes()
 	return ParseFTP(buf, key)
 }
 
+// ParseFinalized decrypts and deserializes a finalized transaction blob
+// using this wallet's view private key.
 func (w *Wallet) ParseFinalized(buf []byte) (*FinalizedTx, error) {
 	// buf is encrypted using chacha8 xor initialized with the view private key
 	key := w.ViewPrivKey.Bytes()

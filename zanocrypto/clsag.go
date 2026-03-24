@@ -16,12 +16,18 @@ var (
 	CRYPTO_HDS_CLSAG_GGX_CHALLENGE = []byte("ZANO_HDS_CLSAG_GGX_CHALLENGE___\x00")
 )
 
+// CLSAG_GGXInputRef holds the ring member data for a CLSAG-GGX ring signature:
+// stealth address, amount commitment, and blinded asset ID.
 type CLSAG_GGXInputRef struct {
 	StealthAddress   *edwards25519.Point
 	AmountCommitment *edwards25519.Point
 	BlindedAssetID   *edwards25519.Point
 }
 
+// GenerateCLSAG_GGX generates a three-layer CLSAG-GGX ring signature proving
+// knowledge of the secret keys corresponding to the real input in the ring.
+// The three layers authenticate the stealth address, amount blinding mask,
+// and asset ID blinding mask respectively.
 func GenerateCLSAG_GGX(
 	rnd io.Reader,
 	m []byte,
@@ -37,7 +43,7 @@ func GenerateCLSAG_GGX(
 	if ringSize == 0 {
 		return nil, errors.New("ring size is zero")
 	}
-	if secretIndex < 0 || secretIndex >= uint64(ringSize) {
+	if secretIndex >= uint64(ringSize) {
 		return nil, errors.New("secretIndex out of range")
 	}
 

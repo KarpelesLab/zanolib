@@ -1,5 +1,7 @@
 package zanobase
 
+// GenContext holds the generation context for building transaction signatures
+// and proofs, including per-output commitments, blinding masks, and aggregated sums.
 type GenContext struct {
 	AssetIds                            []*Point
 	BlindedAssetIds                     []*Point
@@ -26,6 +28,8 @@ type GenContext struct {
 	TxPubKeyP                           *Point
 }
 
+// Resize adjusts the per-input and per-output slices to accommodate
+// inCnt inputs and outCnt outputs.
 func (g *GenContext) Resize(inCnt, outCnt int) {
 	g.AssetIds = resizeSlice(g.AssetIds, outCnt)
 	g.BlindedAssetIds = resizeSlice(g.BlindedAssetIds, outCnt)
@@ -44,6 +48,7 @@ func resizeSlice[S ~[]E, E any](s S, n int) S {
 	return append(s, make([]E, n-len(s))...)
 }
 
+// KeyPair holds a public/secret key pair.
 type KeyPair struct {
 	// TODO KeyPair doesn't have a BEGIN_SERIALIZE_OBJECT
 	Pub *Point

@@ -9,6 +9,8 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// FinalizedTx represents a fully constructed and signed Zano transaction
+// along with its metadata and the original finalization parameters.
 type FinalizedTx struct {
 	Tx             *zanobase.Transaction     `json:"tx"`
 	TxId           zanobase.Value256         `json:"txid"`         // might be zeroes?
@@ -20,6 +22,9 @@ type FinalizedTx struct {
 	WasNotPrepared bool                      `json:"was_not_prepared"`          // true if tx was not prepared/created for some good reason (e.g. not enough outs for UTXO defragmentation tx). Because we decided not to throw exceptions for non-error cases. -- sowle
 }
 
+// ParseFinalized decrypts buf using the provided view secret key and
+// deserializes it into a [FinalizedTx]. Returns an error if decryption
+// or deserialization fails, or if there is trailing data.
 func ParseFinalized(buf, viewSecretKey []byte) (*FinalizedTx, error) {
 	code, err := zanocrypto.ChaCha8GenerateKey(viewSecretKey)
 	if err != nil {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+// Variant is a tagged union type analogous to C++ boost::variant, used
+// throughout Zano's serialization format to represent polymorphic values.
 type Variant struct {
 	Tag   Tag
 	Value any // any type stored as a boost::variant
@@ -20,6 +22,7 @@ type marshalledVariant struct {
 	Value any    `json:"value"`
 }
 
+// MarshalJSON encodes the variant as a JSON object with "type" and "value" fields.
 func (p *Variant) MarshalJSON() ([]byte, error) {
 	obj := &marshalledVariant{
 		Value: p.Value,
@@ -32,10 +35,13 @@ func (p *Variant) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
+// VariantFor creates a new [Variant] with the correct tag for the given type T.
 func VariantFor[T any](obj T) *Variant {
 	return &Variant{Tag: TagFor[T](), Value: obj}
 }
 
+// VariantAs extracts the value from a [Variant] as type T. Panics if the
+// value is not of the expected type.
 func VariantAs[T any](p *Variant) T {
 	return p.Value.(T)
 }

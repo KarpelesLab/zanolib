@@ -8,6 +8,9 @@ import (
 	"github.com/KarpelesLab/zanolib/zanobase"
 )
 
+// GenerateVectorUgAggregationProof generates a UG aggregation proof linking
+// amount commitments to their range proof aggregation commitments, proving
+// knowledge of the amounts and blinding factors in zero knowledge.
 func GenerateVectorUgAggregationProof(rnd io.Reader, contextHash []byte, uSecrets, gSecrets0, gSecrets1 []*edwards25519.Scalar, amountCommitments, amountCommitmentsForRpAggregation, blindedAssetIds []*edwards25519.Point) (*zanobase.UGAggProof, error) {
 	// bool generate_vector_UG_aggregation_proof(const hash& m, const scalar_vec_t& u_secrets, const scalar_vec_t& g_secrets0, const scalar_vec_t& g_secrets1,
 	// const std::vector<point_t>& amount_commitments,
@@ -100,6 +103,9 @@ func GenerateVectorUgAggregationProof(rnd io.Reader, contextHash []byte, uSecret
 	return res, nil
 }
 
+// GenerateDoubleSchnorrSig generates a double Schnorr signature proving
+// knowledge of secret_a and secret_b such that A = secret_a * gen0 and
+// B = secret_b * gen1.
 func GenerateDoubleSchnorrSig(rnd io.Reader, gen0, gen1 *edwards25519.Point, m []byte, A *edwards25519.Point, secret_a *edwards25519.Scalar, B *edwards25519.Point, secret_b *edwards25519.Scalar) (*zanobase.GenericDoubleSchnorrSig, error) {
 	r0 := RandomScalar(rnd)
 	r1 := RandomScalar(rnd)

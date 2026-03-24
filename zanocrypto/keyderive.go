@@ -7,6 +7,8 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
+// GenerateKeyDerivation computes an ECDH key derivation: 8 * secKey * pubKey.
+// The multiplication by 8 ensures the result is in the prime-order subgroup.
 func GenerateKeyDerivation(pubKey *edwards25519.Point, secKey *edwards25519.Scalar) (*edwards25519.Point, error) {
 	p := new(edwards25519.Point).ScalarMult(secKey, pubKey)
 
@@ -18,6 +20,8 @@ func GenerateKeyDerivation(pubKey *edwards25519.Point, secKey *edwards25519.Scal
 	return p, nil
 }
 
+// DerivationHint computes a 16-bit hint from a key derivation by hashing it
+// with BLAKE2b-256 and XOR-folding the result.
 func DerivationHint(derivation *edwards25519.Point) uint16 {
 	// Compute 32-byte blake2b hash
 	hash := blake2b.Sum256(derivation.Bytes())

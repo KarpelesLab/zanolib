@@ -8,11 +8,15 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// TxDestHtlcOut contains HTLC (Hash Time-Locked Contract) options for a
+// transaction destination.
 type TxDestHtlcOut struct {
 	Expiration uint64
 	HtlcHash   zanobase.Value256 // crypto::hash
 }
 
+// TxDest represents a transaction output destination including the
+// recipient address, amount, asset ID, and optional HTLC parameters.
 type TxDest struct {
 	Amount          uint64
 	Addr            []*zanobase.AccountPublicAddr // account_public_address; destination address, in case of 1 address - txout_to_key, in case of more - txout_multisig
@@ -24,6 +28,8 @@ type TxDest struct {
 	Flags           uint64                        // set of flags (see tx_destination_entry_flags)
 }
 
+// StealthAddress computes the one-time stealth address for this destination
+// using the derivation scalar and the recipient's spend public key.
 func (dst *TxDest) StealthAddress(scalar *edwards25519.Scalar, ogc *zanobase.GenContext, i int) *edwards25519.Point {
 	// 1. Compute H = h * G
 	H := new(edwards25519.Point).ScalarBaseMult(scalar)
@@ -34,6 +40,8 @@ func (dst *TxDest) StealthAddress(scalar *edwards25519.Scalar, ogc *zanobase.Gen
 	return new(edwards25519.Point).Add(H, P)
 }
 
+// ConcealingPoint computes the concealing point Q for this output, derived
+// from the recipient's view public key and the derivation scalar.
 func (dst *TxDest) ConcealingPoint(scalar *edwards25519.Scalar, ogc *zanobase.GenContext, i int) *edwards25519.Point {
 	// ConcealingPoint
 	h := zanocrypto.HashToScalar(slices.Concat([]byte("ZANO_HDS_OUT_CONCEALING_POINT__\x00"), scalar.Bytes()))
@@ -43,6 +51,8 @@ func (dst *TxDest) ConcealingPoint(scalar *edwards25519.Scalar, ogc *zanobase.Ge
 	return new(edwards25519.Point).ScalarMult(h, v)
 }
 
+// BlindedAssetId computes the blinded asset ID T = assetId + blindingMask * X,
+// pre-multiplied by 1/8. It also stores the blinding mask in ogc.
 func (dst *TxDest) BlindedAssetId(scalar *edwards25519.Scalar, ogc *zanobase.GenContext, i int) *edwards25519.Point {
 	// zanocrypto.HashToScalar will also reduce
 	assetBlindingMask := zanocrypto.HashToScalar(slices.Concat([]byte("ZANO_HDS_OUT_ASSET_BLIND_MASK__\x00"), scalar.Bytes()))
@@ -63,6 +73,8 @@ func (dst *TxDest) BlindedAssetId(scalar *edwards25519.Scalar, ogc *zanobase.Gen
 	return new(edwards25519.Point).ScalarMult(zanocrypto.Sc1div8, S)
 }
 
+// AmountCommitment computes the Pedersen commitment to the output amount:
+// amount * blindedAssetId + blindingMask * G, pre-multiplied by 1/8.
 func (dst *TxDest) AmountCommitment(scalar *edwards25519.Scalar, ogc *zanobase.GenContext, i int) *edwards25519.Point {
 	// amount_blinding_mask = crypto::hash_helper_t::hs(CRYPTO_HDS_OUT_AMOUNT_BLINDING_MASK, h)
 	amountBlindingMask := zanocrypto.HashToScalar(slices.Concat([]byte("ZANO_HDS_OUT_AMOUNT_BLIND_MASK_\x00"), scalar.Bytes()))

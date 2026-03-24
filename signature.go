@@ -19,6 +19,10 @@ var (
 	CRYPTO_HDS_OUT_AMOUNT_BLINDING_MASK = []byte("ZANO_HDS_OUT_AMOUNT_BLIND_MASK_\x00")
 )
 
+// Sign constructs and signs a Zano transaction from the given finalization
+// parameters. If oneTimeKey is nil, a random key is generated. The method
+// builds the transaction structure, generates CLSAG-GGX ring signatures for
+// each input, and produces balance, range, and asset surjection proofs.
 func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25519.Scalar) (*FinalizedTx, error) {
 	if !bytes.Equal(ftp.SpendPubKey.Bytes(), w.SpendPubKey.Bytes()) {
 		return nil, errors.New("spend key does not match")

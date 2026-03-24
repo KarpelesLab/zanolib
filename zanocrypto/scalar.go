@@ -16,6 +16,7 @@ func must[T any](v T, err error) T {
 	return v
 }
 
+// Pre-computed scalar constants.
 var (
 	ScZero  = initSc([32]byte{})
 	ScOne   = initSc([32]byte{1})

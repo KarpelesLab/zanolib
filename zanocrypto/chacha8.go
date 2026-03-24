@@ -8,8 +8,8 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// Zano uses chacha8 to encrypt unsigned transactions
-
+// ChaCha8GenerateKey derives a 32-byte ChaCha8 encryption key from a seed
+// by hashing it with Keccak-256. The seed must be at least 32 bytes.
 func ChaCha8GenerateKey(seed []byte) ([]byte, error) {
 	if len(seed) < 32 {
 		return nil, errors.New("Size of hash must be at least that of chacha8_key")

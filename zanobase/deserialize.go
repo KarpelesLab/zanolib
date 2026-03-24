@@ -17,7 +17,9 @@ var (
 	variantType    = reflect.TypeFor[Variant]()
 )
 
-// Deserialize implements epee deserializer (kind of)
+// Deserialize reads EPEE binary data from rx and populates target.
+// It handles structs via reflection, slices with varint-prefixed lengths,
+// and primitive types. Types implementing io.ReaderFrom are handled directly.
 func Deserialize(rx io.Reader, target any) error {
 	var err error
 	var buf rc.ByteAndReadReader

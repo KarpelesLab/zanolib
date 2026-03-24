@@ -18,6 +18,10 @@ var (
 	writerToType = reflect.TypeFor[io.WriterTo]()
 )
 
+// Serialize writes the EPEE binary serialization of source to w. It handles
+// structs via reflection, slices with varint-prefixed lengths, and primitive
+// types. Types implementing io.WriterTo or the byter interface are handled
+// directly.
 func Serialize(w io.Writer, source any) error {
 	obj := reflect.ValueOf(source)
 	t := obj.Type()

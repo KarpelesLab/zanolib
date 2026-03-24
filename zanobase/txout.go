@@ -1,5 +1,7 @@
 package zanobase
 
+// TxOutZarcanium represents a Zarcanum-type transaction output with stealth
+// address, concealing point, Pedersen commitment, and blinded asset ID.
 type TxOutZarcanium struct {
 	// tx_out_zarcanum
 	StealthAddress   Value256

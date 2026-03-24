@@ -9,6 +9,9 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// GenerateZcOutsRangeProof generates a range proof for all zero-confidential
+// outputs, proving that each output amount is in [0, 2^64). The proof
+// (including UG aggregation and BPP signature) is appended to tx.Proofs.
 func GenerateZcOutsRangeProof(rnd io.Reader, tx *zanobase.Transaction, contextHash []byte, ogc *zanobase.GenContext) error {
 	// bool generate_zc_outs_range_proof(const crypto::hash& context_hash, const tx_generation_context& outs_gen_context, const std::vector<tx_out_v>& vouts, zc_outs_range_proof& result)
 	res := new(zanobase.ZCOutsRangeProof)

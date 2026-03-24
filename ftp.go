@@ -9,6 +9,9 @@ import (
 	"github.com/KarpelesLab/zanolib/zanocrypto"
 )
 
+// FinalizeTxParam contains the parameters needed to finalize and sign a
+// Zano transaction. It is typically received encrypted from the network
+// and parsed via [ParseFTP] or [Wallet.ParseFTP].
 type FinalizeTxParam struct {
 	UnlockTime           uint64
 	Extra                []*zanobase.Variant         // currency::extra_v
@@ -29,6 +32,9 @@ type FinalizeTxParam struct {
 	//GenContext      *GenContext // if flags & TX_FLAG_SIGNATURE_MODE_SEPARATE
 }
 
+// ParseFTP decrypts buf using the provided view secret key and deserializes
+// it into a [FinalizeTxParam]. Returns an error if decryption or
+// deserialization fails, or if there is trailing data.
 func ParseFTP(buf, viewSecretKey []byte) (*FinalizeTxParam, error) {
 	code, err := zanocrypto.ChaCha8GenerateKey(viewSecretKey)
 	if err != nil {

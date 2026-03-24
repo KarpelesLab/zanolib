@@ -6,6 +6,9 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+// HashToEC hashes the input bytes to an Edwards25519 curve point using
+// Keccak-256 followed by the Monero/Zano ge_fromfe_frombytes_vartime mapping,
+// then multiplies by 8 to ensure the result is in the prime-order subgroup.
 func HashToEC(pubBytes []byte) (*edwards25519.Point, error) {
 	hash := sha3.NewLegacyKeccak256()
 	hash.Write(pubBytes)

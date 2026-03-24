@@ -11,6 +11,9 @@ import (
 
 // src/crypto/one_out_of_many_proofs.cpp
 
+// Generate_BGE_Proof generates a Background Equivalence (one-out-of-many)
+// proof demonstrating that the prover knows the discrete log of one element
+// in the ring, without revealing which one.
 func Generate_BGE_Proof(rnd io.Reader, contextHash []byte, ring []*edwards25519.Point, secret *edwards25519.Scalar, secretIndex int) (*zanobase.BGEProof, error) {
 	res := new(zanobase.BGEProof)
 	n := 4 // TODO: @#@# move it out
