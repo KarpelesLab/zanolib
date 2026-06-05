@@ -38,16 +38,25 @@ func TestBuildDecoyOffsets(t *testing.T) {
 	}
 }
 
-func TestBinURL(t *testing.T) {
-	cases := map[string]string{
-		"https://rpc.modchain.net/chain/zano/rpc":  "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin",
-		"https://rpc.modchain.net/chain/zano/rpc/": "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin",
-		"https://rpc.modchain.net/chain/zano":      "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin",
+func TestEndpointURLs(t *testing.T) {
+	cases := []struct {
+		endpoint string
+		json     string
+		bin      string
+	}{
+		// empty => modchain gateway layout
+		{"", "https://rpc.modchain.net/chain/zano/rpc", "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin"},
+		// non-empty => direct daemon (/json_rpc, /<method>.bin)
+		{"http://127.0.0.1:11211", "http://127.0.0.1:11211/json_rpc", "http://127.0.0.1:11211/getrandom_outs3.bin"},
+		{"http://127.0.0.1:11211/", "http://127.0.0.1:11211/json_rpc", "http://127.0.0.1:11211/getrandom_outs3.bin"},
 	}
-	for ep, want := range cases {
-		c := &Client{Endpoint: ep}
-		if got := c.binURL("getrandom_outs3"); got != want {
-			t.Errorf("binURL(%q) = %q, want %q", ep, got, want)
+	for _, tc := range cases {
+		c := &Client{Endpoint: tc.endpoint}
+		if got := c.jsonRPCURL(); got != tc.json {
+			t.Errorf("jsonRPCURL(%q) = %q, want %q", tc.endpoint, got, tc.json)
+		}
+		if got := c.binURL("getrandom_outs3"); got != tc.bin {
+			t.Errorf("binURL(%q) = %q, want %q", tc.endpoint, got, tc.bin)
 		}
 	}
 }

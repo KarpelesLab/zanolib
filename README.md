@@ -87,7 +87,7 @@ import (
 // A view-only wallet is enough to detect deposits.
 wallet, _ := zanolib.LoadSpendSecret(secret, 0)
 
-scanner := zanorpc.NewScanner(wallet, "https://rpc.modchain.net/chain/zano/rpc")
+scanner := zanorpc.NewScanner(wallet, "") // "" = public modchain gateway; or pass a daemon base URL like "http://127.0.0.1:11211"
 
 // Resume from the last height you persisted, up to the current confirmed tip.
 last, err := scanner.ScanRange(context.Background(), fromHeight, toHeight, func(d zanorpc.Deposit) error {
@@ -119,7 +119,7 @@ import (
 )
 
 wallet, _ := zanolib.LoadSpendSecret(secret, 0) // full wallet (can sign)
-client := zanorpc.New("https://rpc.modchain.net/chain/zano/rpc")
+client := zanorpc.New("") // "" = modchain gateway; or a daemon base URL
 
 // deposits: a []*zanorpc.Deposit gathered from scanning (see Deposit Scanning)
 signed, raw, status, err := client.SweepTo(

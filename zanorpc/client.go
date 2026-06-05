@@ -14,11 +14,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 )
 
-// Client is a JSON-RPC client for a Zano daemon endpoint, e.g.
-// "https://rpc.modchain.net/chain/zano/rpc".
+// ModchainZano is the base URL of the public modchain Zano gateway, used when a
+// Client's Endpoint is empty.
+const ModchainZano = "https://rpc.modchain.net/chain/zano"
+
+// Client talks to a Zano daemon. Endpoint is the daemon's base URL (e.g.
+// "http://127.0.0.1:11211"); JSON-RPC is served at "<base>/json_rpc" and binary
+// methods at "<base>/<method>.bin". As a special case, an empty Endpoint targets
+// the public modchain gateway ([ModchainZano]), whose layout differs
+// ("<base>/rpc" and "<base>/raw/<method>.bin").
 type Client struct {
 	Endpoint string
 	HTTP     *http.Client
@@ -27,9 +35,26 @@ type Client struct {
 	assetCache map[string]*AssetDescriptor
 }
 
-// New returns a Client for the given JSON-RPC endpoint using http.DefaultClient.
+// New returns a Client for the given daemon base URL using http.DefaultClient.
+// Pass "" to use the public modchain gateway.
 func New(endpoint string) *Client {
 	return &Client{Endpoint: endpoint, HTTP: http.DefaultClient}
+}
+
+// jsonRPCURL returns the JSON-RPC 2.0 endpoint URL.
+func (c *Client) jsonRPCURL() string {
+	if c.Endpoint == "" {
+		return ModchainZano + "/rpc"
+	}
+	return strings.TrimRight(c.Endpoint, "/") + "/json_rpc"
+}
+
+// binURL returns the binary endpoint URL for a method.
+func (c *Client) binURL(method string) string {
+	if c.Endpoint == "" {
+		return ModchainZano + "/raw/" + method + ".bin"
+	}
+	return strings.TrimRight(c.Endpoint, "/") + "/" + method + ".bin"
 }
 
 type rpcRequest struct {
@@ -59,7 +84,7 @@ func (c *Client) call(ctx context.Context, method string, params, out any) error
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.jsonRPCURL(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

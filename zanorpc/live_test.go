@@ -14,8 +14,9 @@ import (
 )
 
 // liveEndpoint is used by the opt-in live tests. Set ZANO_RPC_LIVE=1 to run them
-// (they make real network calls to a public Zano daemon).
-const liveEndpoint = "https://rpc.modchain.net/chain/zano/rpc"
+// (they make real network calls). Empty string targets the public modchain
+// gateway (zanorpc.ModchainZano).
+const liveEndpoint = ""
 
 func liveOrSkip(t *testing.T) {
 	if os.Getenv("ZANO_RPC_LIVE") == "" {

@@ -11,7 +11,6 @@ import (
 	"math/big"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/KarpelesLab/zanolib/epee"
 	"github.com/KarpelesLab/zanolib/zanobase"
@@ -109,15 +108,6 @@ func (c *Client) SendRawTx(ctx context.Context, raw []byte) (string, error) {
 		return "", err
 	}
 	return res.Status, nil
-}
-
-// binURL derives the daemon's binary endpoint for a method from the JSON-RPC
-// Endpoint, e.g. ".../chain/zano/rpc" -> ".../chain/zano/raw/<method>.bin".
-func (c *Client) binURL(method string) string {
-	// Strip any trailing slash, then the trailing "/rpc" segment (TrimSuffix is
-	// suffix-only, so the "rpc." in the hostname is unaffected).
-	base := strings.TrimSuffix(strings.TrimRight(c.Endpoint, "/"), "/rpc")
-	return base + "/raw/" + method + ".bin"
 }
 
 // postBin posts an epee-serialized request body to a .bin endpoint and returns
