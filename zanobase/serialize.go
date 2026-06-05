@@ -81,7 +81,7 @@ func Serialize(w io.Writer, source any) error {
 func subSerialize(w io.Writer, o any, tag string) error {
 	var err error
 	switch v := o.(type) {
-	case bool, uint8, uint16:
+	case bool, uint8, uint16, uint32:
 		err = binary.Write(w, binary.LittleEndian, v)
 	case uint64:
 		if tag == "varint" {

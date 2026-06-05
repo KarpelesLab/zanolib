@@ -17,15 +17,31 @@ var (
 	tagTypeLookup = make(map[reflect.Type]Tag)
 )
 
+// Variant tag values, matching the SET_VARIANT_TAGS table in zano's
+// src/currency_core/currency_basic.h.
 const (
 	TagGen                    Tag = 0
+	TagToKey                  Tag = 1
+	TagComment                Tag = 7
+	TagCryptoChecksum         Tag = 10
 	TagDerivationHint         Tag = 11
+	TagServiceAttachment      Tag = 12
+	TagUnlockTime             Tag = 14
+	TagExpirationTime         Tag = 15
+	TagTxFlags                Tag = 16
+	TagSignedParts            Tag = 17
+	TagExtraAttachmentInfo    Tag = 18
+	TagUserData               Tag = 19
+	TagExtraPadding           Tag = 21
 	TagPubKey                 Tag = 22
 	TagEtcTxFlags16           Tag = 23
 	TagDeriveXor              Tag = 24
 	TagRefById                Tag = 25
 	TagUint64                 Tag = 26
+	TagEtcTxTime              Tag = 27
 	TagUint32                 Tag = 28
+	TagPayer                  Tag = 31
+	TagReceiver               Tag = 32
 	TagTxinZcInput            Tag = 37
 	TagTxOutZarcanum          Tag = 38
 	TagZarcaniumTxDataV1      Tag = 39
@@ -48,13 +64,27 @@ func defTag[T any](tag Tag, name string) {
 
 func init() {
 	defTag[*TxInGen](TagGen, "gen")
+	defTag[*TxInToKey](TagToKey, "key")
+	defTag[*TxComment](TagComment, "comment")
+	defTag[*TxCryptoChecksum](TagCryptoChecksum, "checksum")
 	defTag[[]byte](TagDerivationHint, "derivation_hint")
+	defTag[*TxServiceAttachment](TagServiceAttachment, "attachment")
+	defTag[*EtcTxDetailsUnlockTime](TagUnlockTime, "unlock_time")
+	defTag[*EtcTxDetailsExpirationTime](TagExpirationTime, "expiration_time")
+	defTag[*EtcTxDetailsFlags](TagTxFlags, "flags")
+	defTag[*SignedParts](TagSignedParts, "signed_outs")
+	defTag[*ExtraAttachmentInfo](TagExtraAttachmentInfo, "extra_attach_info")
+	defTag[*ExtraUserData](TagUserData, "user_data")
+	defTag[*ExtraPadding](TagExtraPadding, "extra_padding")
 	defTag[Value256](TagPubKey, "pub_key")
 	defTag[uint16](TagEtcTxFlags16, "etc_tx_flags16")
 	defTag[uint16](TagDeriveXor, "derive_xor")
 	defTag[*RefById](TagRefById, "ref_by_id")
 	defTag[uint64](TagUint64, "uint64_t")
+	defTag[*EtcTxTime](TagEtcTxTime, "etc_tx_time")
 	defTag[uint32](TagUint32, "uint32_t")
+	defTag[*TxPayer](TagPayer, "payer2")
+	defTag[*TxReceiver](TagReceiver, "receiver2")
 	defTag[*TxInZcInput](TagTxinZcInput, "txin_zc_input")
 	defTag[*TxOutZarcanium](TagTxOutZarcanum, "tx_out_zarcanum")
 	defTag[*ZarcaniumTxDataV1](TagZarcaniumTxDataV1, "zarcanum_tx_data_v1")
@@ -91,4 +121,16 @@ func (t Tag) Type() reflect.Type {
 		panic("invalid tag")
 	}
 	return def.typ
+}
+
+// TypeOK returns the reflect.Type registered for this tag, and whether it is
+// registered. Unlike [Tag.Type], it does not panic on unknown tags, so callers
+// (such as the deserializer) can surface a clean error when encountering a
+// variant type this library does not yet understand.
+func (t Tag) TypeOK() (reflect.Type, bool) {
+	def, ok := variantTags[t]
+	if !ok {
+		return nil, false
+	}
+	return def.typ, true
 }

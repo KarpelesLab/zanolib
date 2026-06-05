@@ -94,7 +94,7 @@ func Deserialize(rx io.Reader, target any) error {
 func subDeserialize(r rc.ByteAndReadReader, o any, tag string) error {
 	var err error
 	switch v := o.(type) {
-	case *bool, *uint8, *uint16:
+	case *bool, *uint8, *uint16, *uint32:
 		err = binary.Read(r, binary.LittleEndian, v)
 	case *uint64:
 		if tag == "varint" {
@@ -140,7 +140,12 @@ func subDeserialize(r rc.ByteAndReadReader, o any, tag string) error {
 		}
 		tag := Tag(tagV)
 		v.Tag = tag
-		typ := tag.Type()
+		typ, ok := tag.TypeOK()
+		if !ok {
+			// Unknown variant type: a binary variant has no length prefix, so we
+			// cannot skip it. Surface a clean error rather than panicking.
+			return fmt.Errorf("unsupported variant tag %d", tagV)
+		}
 		obj := reflect.New(typ)
 		err = Deserialize(r, obj)
 		if err != nil {

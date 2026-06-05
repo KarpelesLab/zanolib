@@ -1,8 +1,21 @@
 package zanobase
 
 // TxInGen represents a coinbase (generation) transaction input.
+// currency::txin_gen { size_t height; } // VARINT
 type TxInGen struct {
-	Height uint64
+	Height uint64 `epee:"varint"`
+}
+
+// TxInToKey is a legacy (pre-HF4) transparent transaction input.
+//
+//	currency::txin_to_key : referring_input {
+//	  uint64_t amount /*VARINT*/; <key_offsets from referring_input>;
+//	  crypto::key_image k_image; std::vector<txin_etc_details_v> etc_details; }
+type TxInToKey struct {
+	Amount     uint64     `json:"amount" epee:"varint"`
+	KeyOffsets []*Variant `json:"key_offsets"` // txout_ref_v = variant<uint64_t, ref_by_id>
+	KImage     *Point     `json:"k_image"`     // crypto::key_image
+	EtcDetails []*Variant `json:"etc_details,omitempty"`
 }
 
 // TxInZcInput represents a zero-confidential transaction input with ring

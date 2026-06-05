@@ -125,6 +125,29 @@ func (tx *Transaction) ReadFrom(r io.Reader) (int64, error) {
 	return cr.Ret64()
 }
 
+// DeserializeForScan reads only the parts of a transaction needed to detect
+// received outputs and recover payment ids: the prefix (version, vin, extra,
+// vout, hardfork_id) and the attachment section, which in the binary layout
+// precede signatures and proofs. It stops before signatures, so a scanner can
+// process every on-chain transaction without implementing every signature/proof
+// variant (notably the large PoS zarcanum_sig). Remaining bytes are left unread.
+func DeserializeForScan(r io.Reader) (*Transaction, error) {
+	cr := rc.New(r)
+	tx := new(Transaction)
+	if err := deserializeFields(cr, &tx.Version, &tx.Vin, &tx.Extra, &tx.Vout); err != nil {
+		return nil, err
+	}
+	if uint64(tx.Version) >= TransactionVersionPostHF5 {
+		if err := Deserialize(cr, &tx.HardforkId); err != nil {
+			return nil, err
+		}
+	}
+	if err := Deserialize(cr, &tx.Attachment); err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+
 // Hash computes the Keccak-256 hash of the serialized transaction prefix.
 func (txp *TransactionPrefix) Hash() ([]byte, error) {
 	h := sha3.NewLegacyKeccak256()
