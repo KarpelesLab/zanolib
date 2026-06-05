@@ -36,9 +36,9 @@ type TxSource struct {
 	HtlcOrigin                 string // for htlc, specify origin. len = 1, content = "\x00" ?
 	// unexported fields are not (de)serialized with the FTP blob; they are set
 	// by the in-package transfer builder.
-	assetId   *zanobase.Point // unblinded source asset id (native ⇒ NativeCoinAssetIdPt); for multi-asset txs
-	isZCInput bool            // set when this source is a Zarcanum (post-HF4) output regardless of mask value
-	ephemeral *zanobase.KeyPair
+	assetId   *zanobase.Point  // unblinded source asset id (native ⇒ NativeCoinAssetIdPt); for multi-asset txs
+	isZCInput bool             // set when this source is a Zarcanum (post-HF4) output regardless of mask value
+	hi        *zanobase.Scalar // public per-output scalar Hs(8*v*R, idx); secret0Xp = hi + spend secret
 }
 
 // IsZC returns true if this source is a zero-confidential (ZC) input. A source
@@ -53,7 +53,7 @@ func (src *TxSource) IsZC() bool {
 	return src.RealOutAssetIdBlindingMask.Scalar.Equal(zanocrypto.ScZero) == 0
 }
 
-func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inputIndex int, sig *zanobase.ZCSig, txHashForSig []byte, ogc *zanobase.GenContext, lastOutput bool) error {
+func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inputIndex int, sig *zanobase.ZCSig, txHashForSig []byte, ogc *zanobase.GenContext, lastOutput bool, signer InputSigner) error {
 	in := zanobase.VariantAs[*zanobase.TxInZcInput](tx.Vin[inputIndex])
 
 	//crypto::point_t asset_id_pt(se.asset_id);
@@ -165,10 +165,10 @@ func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inpu
 	// txin_zc_input& in = boost::get<txin_zc_input>(tx.vin[input_index]);
 
 	ki := in.KeyImage.Point
-	secret0xp := src.ephemeral.Sec.Scalar
 	secret1f := new(edwards25519.Scalar).Subtract(src.RealOutAmountBlindingMask.Scalar, pseudoOutAmountBlindingMask)
 	secret2t := new(edwards25519.Scalar).Negate(pseudoOutAssetIdBlindingMask)
-	sigggx, err := zanocrypto.GenerateCLSAG_GGX(rnd, txHashForSig, ring, ki, pseudoOutAmountCommitment, pseudoOutBlindedAssetId, secret0xp, secret1f, secret2t, src.RealOutput)
+	// secret0Xp = src.hi + spend secret is supplied by the signer (local or MPC).
+	sigggx, err := signer.SignCLSAG(rnd, src.hi.Scalar, txHashForSig, ring, ki, pseudoOutAmountCommitment, pseudoOutBlindedAssetId, secret1f, secret2t, src.RealOutput)
 
 	sig.GGX = sigggx
 

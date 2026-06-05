@@ -27,6 +27,18 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 	if w.IsViewOnly() {
 		return nil, errors.New("cannot sign with a view-only wallet (no spend secret key)")
 	}
+	return w.SignWith(rnd, ftp, oneTimeKey, LocalInputSigner(w.SpendPrivKey))
+}
+
+// SignWith is like Sign but uses the provided InputSigner for the
+// spend-key-dependent operations (key image and CLSAG signature). This lets a
+// view-only wallet drive signing via a threshold/MPC signer (the spend secret
+// is never held locally). The wallet's view key and spend public key are still
+// used for the (public) ephemeral-key derivation and output construction.
+func (w *Wallet) SignWith(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25519.Scalar, signer InputSigner) (*FinalizedTx, error) {
+	if signer == nil {
+		return nil, errors.New("nil input signer")
+	}
 	if !bytes.Equal(ftp.SpendPubKey.Bytes(), w.SpendPubKey.Bytes()) {
 		return nil, errors.New("spend key does not match")
 	}
@@ -114,17 +126,16 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 		if err != nil {
 			return nil, err
 		}
-		in_e_sec, err := zanocrypto.DeriveSecretKey(derivation.Bytes(), src.RealOutInTxIndex, w.SpendPrivKey)
-		if err != nil {
-			return nil, err
-		}
-		src.ephemeral = &zanobase.KeyPair{Sec: &zanobase.Scalar{in_e_sec}, Pub: &zanobase.Point{in_e_pub}}
+		// hi = Hs(8*v*R, i): the public per-output scalar (no spend secret). The
+		// effective spend ephemeral is secret0Xp = hi + x, supplied by the signer.
+		hi := zanocrypto.HashToScalar(slices.Concat(derivation.Bytes(), zanobase.Varint(src.RealOutInTxIndex).Bytes()))
+		src.hi = &zanobase.Scalar{Scalar: hi}
 		// in_context.in_ephemeral.pub == in_context.outputs[in_context.real_out_index].stealth_address
 		if !bytes.Equal(in_e_pub.Bytes(), realOut.StealthAddress.Bytes()) {
 			return nil, errors.New("derived public key missmatch with output public key!")
 		}
-		// key image
-		keyImage, err := zanocrypto.ComputeKeyImage(in_e_sec, in_e_pub)
+		// key image (spend-key-dependent; via the signer)
+		keyImage, err := signer.KeyImage(hi, in_e_pub)
 		if err != nil {
 			return nil, err
 		}
@@ -288,7 +299,7 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 			if err != nil {
 				return nil, err
 			}
-			src.generateZCSig(rnd, tx, n, sig, txHashForSig, ogc, n+1 == len(ftp.Sources))
+			src.generateZCSig(rnd, tx, n, sig, txHashForSig, ogc, n+1 == len(ftp.Sources), signer)
 			tx.Signatures = append(tx.Signatures, &zanobase.Variant{Tag: zanobase.TagZCSig, Value: sig})
 		}
 	}
