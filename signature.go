@@ -250,7 +250,7 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 			if err != nil {
 				return nil, err
 			}
-			src.generateZCSig(rnd, tx, n, sig, txHashForSig, ogc)
+			src.generateZCSig(rnd, tx, n, sig, txHashForSig, ogc, n+1 == len(ftp.Sources))
 			tx.Signatures = append(tx.Signatures, &zanobase.Variant{Tag: zanobase.TagZCSig, Value: sig})
 		}
 	}

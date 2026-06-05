@@ -44,7 +44,7 @@ func (src *TxSource) IsZC() bool {
 	return src.RealOutAssetIdBlindingMask.Scalar.Equal(zanocrypto.ScZero) == 0
 }
 
-func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inputIndex int, sig *zanobase.ZCSig, txHashForSig []byte, ogc *zanobase.GenContext) error {
+func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inputIndex int, sig *zanobase.ZCSig, txHashForSig []byte, ogc *zanobase.GenContext, lastOutput bool) error {
 	in := zanobase.VariantAs[*zanobase.TxInZcInput](tx.Vin[inputIndex])
 
 	//crypto::point_t asset_id_pt(se.asset_id);
@@ -56,17 +56,28 @@ func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inpu
 	ogc.RealZcInsAssetIds = append(ogc.RealZcInsAssetIds, &zanobase.Point{assetId})
 
 	//crypto::scalar_t pseudo_out_amount_blinding_mask = 0;
-
-	//pseudo_out_amount_blinding_mask = ogc.amount_blinding_masks_sum - ogc.pseudo_out_amount_blinding_masks_sum + (ogc.ao_commitment_in_outputs ? ogc.ao_amount_blinding_mask : -ogc.ao_amount_blinding_mask);      // A_1 - A^p_0 = (f_1 - f'_1) * G   =>  f'_{i-1} = sum{y_j} - sum{f'_i}
 	var pseudoOutAmountBlindingMask *edwards25519.Scalar
-	A := new(edwards25519.Scalar).Set(ogc.AoAmountBlindingMask.Scalar)
-	if !ogc.AoCommitmentInOutputs {
-		A = A.Negate(A)
+	if lastOutput {
+		// either normal tx or the last signature of consolidated tx -- in both cases we need to
+		// calculate a non-random blinding mask for the pseudo output commitment so the G-components
+		// of the balance equation cancel out:
+		// pseudo_out_amount_blinding_mask = ogc.amount_blinding_masks_sum - ogc.pseudo_out_amount_blinding_masks_sum + (ogc.ao_commitment_in_outputs ? ogc.ao_amount_blinding_mask : -ogc.ao_amount_blinding_mask);
+		//   // A_1 - A^p_0 = (f_1 - f'_1) * G   =>  f'_{i-1} = sum{y_j} - sum{f'_i}
+		aoTerm := new(edwards25519.Scalar).Set(ogc.AoAmountBlindingMask.Scalar)
+		if !ogc.AoCommitmentInOutputs {
+			aoTerm.Negate(aoTerm)
+		}
+		m := new(edwards25519.Scalar).Set(ogc.AmountBlindingMasksSum.Scalar)
+		if ogc.PseudoOutAmountBlindingMasksSum != nil {
+			m.Subtract(m, ogc.PseudoOutAmountBlindingMasksSum.Scalar)
+		}
+		pseudoOutAmountBlindingMask = m.Add(m, aoTerm)
+	} else {
+		// pseudo_out_amount_blinding_mask.make_random();
+		// ogc.pseudo_out_amount_blinding_masks_sum += pseudo_out_amount_blinding_mask;
+		pseudoOutAmountBlindingMask = zanocrypto.RandomScalar(rnd)
+		addRefScalar(&ogc.PseudoOutAmountBlindingMasksSum, pseudoOutAmountBlindingMask)
 	}
-	if ogc.PseudoOutAmountBlindingMasksSum != nil {
-		A = new(edwards25519.Scalar).Add(ogc.PseudoOutAmountBlindingMasksSum.Scalar, A)
-	}
-	pseudoOutAmountBlindingMask = new(edwards25519.Scalar).Subtract(ogc.AmountBlindingMasksSum.Scalar, A)
 
 	pseudoOutAssetIdBlindingMask := zanocrypto.RandomScalar(rnd)
 

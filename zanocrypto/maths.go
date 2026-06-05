@@ -1,7 +1,6 @@
 package zanocrypto
 
 import (
-	"math"
 	"math/bits"
 )
 
@@ -32,24 +31,16 @@ func intPow(base, exp int) int {
 	return result
 }
 
-// ceilLogN returns the smallest integer m such that m^n >= ringSize.
+// ceilLogN returns the smallest integer m such that ringSize <= n^m,
+// mirroring crypto::constexpr_ceil_log_n(v, n) from crypto-sugar.h.
+// (Note: this is log base n of ringSize, not the m^n the name might suggest.)
 func ceilLogN(ringSize, n int) int {
-	if ringSize <= 1 {
-		return 1
+	if ringSize <= 1 || n <= 1 {
+		return 0
 	}
-	if n == 1 {
-		return ringSize
-	}
-
-	floatGuess := math.Pow(float64(ringSize), 1.0/float64(n))
-	m := int(math.Ceil(floatGuess))
-
-	// Correct any floating-point rounding errors:
-	for intPow(m, n) < ringSize {
+	m := 0
+	for p := 1; p < ringSize; p *= n {
 		m++
-	}
-	for m > 1 && intPow(m-1, n) >= ringSize {
-		m--
 	}
 	return m
 }

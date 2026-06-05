@@ -21,11 +21,11 @@ go get github.com/KarpelesLab/zanolib
 
 ## Offline Signatures
 
-Compatible Zano version: **2.1.0.382**
+Compatible Zano version: **2.1.0.382** – **2.1.19.477** (the ZC→ZC transaction format is unchanged across this range)
 
 This library allows loading unsigned transactions produced by a view-only simplewallet and signing them offline. There are a few caveats:
 
-- The unsigned transaction is a binary format **not** meant to be portable — it only works between specific versions of Zano. This library is tested against the version above and may not work with newer versions. Blob files aren't versioned so structure changes cannot be detected automatically.
+- The unsigned transaction is a binary format **not** meant to be portable — it only works between specific versions of Zano. This library is tested against the versions above and may not work with newer versions. Blob files aren't versioned so structure changes cannot be detected automatically.
 - For now this library only supports ZC→ZC transactions.
 
 ### Usage
