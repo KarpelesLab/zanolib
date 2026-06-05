@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 )
 
 // Client is a JSON-RPC client for a Zano daemon endpoint, e.g.
@@ -21,6 +22,9 @@ import (
 type Client struct {
 	Endpoint string
 	HTTP     *http.Client
+
+	assetMu    sync.RWMutex
+	assetCache map[string]*AssetDescriptor
 }
 
 // New returns a Client for the given JSON-RPC endpoint using http.DefaultClient.
