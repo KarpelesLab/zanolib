@@ -24,6 +24,9 @@ var (
 // builds the transaction structure, generates CLSAG-GGX ring signatures for
 // each input, and produces balance, range, and asset surjection proofs.
 func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25519.Scalar) (*FinalizedTx, error) {
+	if w.IsViewOnly() {
+		return nil, errors.New("cannot sign with a view-only wallet (no spend secret key)")
+	}
 	if !bytes.Equal(ftp.SpendPubKey.Bytes(), w.SpendPubKey.Bytes()) {
 		return nil, errors.New("spend key does not match")
 	}

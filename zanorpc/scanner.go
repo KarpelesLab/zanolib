@@ -82,6 +82,26 @@ func (s *Scanner) ScanRange(ctx context.Context, from, to uint64, fn func(Deposi
 	return lastDone, nil
 }
 
+// Sync scans from height `from` up to the current confirmed chain tip, invoking
+// fn for every deposit. It returns the next height to resume from (one past the
+// last fully scanned block), which the caller should persist. If from is already
+// at or beyond the tip, it returns from unchanged with no error.
+func (s *Scanner) Sync(ctx context.Context, from uint64, fn func(Deposit) error) (uint64, error) {
+	count, err := s.RPC.GetBlockCount(ctx)
+	if err != nil {
+		return from, err
+	}
+	if count == 0 || from >= count {
+		return from, nil
+	}
+	tip := count - 1 // highest block height
+	last, err := s.ScanRange(ctx, from, tip, fn)
+	if err != nil {
+		return last + 1, err
+	}
+	return last + 1, nil
+}
+
 func (s *Scanner) scanBlock(ctx context.Context, blk *BlockDetails, fn func(Deposit) error) error {
 	for _, txb := range blk.Transactions {
 		td, err := s.RPC.GetTxDetails(ctx, txb.Id)
