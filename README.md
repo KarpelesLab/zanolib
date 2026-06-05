@@ -156,7 +156,13 @@ addr, err := zanompc.Address(key.GroupPublicKey, viewPublicKey, 0)
 
 The view key is **independent** of the threshold spend key (Zano's `view = keccak(spend)` derivation can't run under MPC; the view key only scans, so it is supplied separately). A Zano address is just `(spend_pub, view_pub)`, so this is valid on-chain — at the cost of seed-phrase recovery.
 
-Status: threshold **key generation → address** is implemented and tested with local in-process peers. Threshold **CLSAG signing** (key image + layer-0 response computed from shares) is the next step; the math is the inverse of the single-key signer and enters linearly, so it maps onto FROST-style threshold Schnorr.
+Implemented and tested with local in-process peers (`{t,n}`, e.g. 2-of-3):
+
+- **Distributed key generation → address** (`zanompc.Address`).
+- **Threshold key image** — partial key images combine to the same key image for any signing subset (`zanompc.PartialKeyImage`), as Zano's double-spend detection requires.
+- **Threshold CLSAG-GGX signing** — a two-round protocol (`zanompc.ClsagParty` / `zanompc.ClsagCoordinator`) computes the key image and layer-0 response from the shares; the spend secret is never reconstructed. The resulting signature verifies with `zanocrypto.VerifyCLSAG_GGX`.
+
+Remaining: wiring threshold signing into `Wallet.Sign` (an input-signer interface so a transfer is signed by an MPC session instead of a local key), a networked transport (the tests drive the rounds in-process), and an end-to-end threshold-signed broadcast.
 
 ## License
 
