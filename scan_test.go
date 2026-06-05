@@ -16,13 +16,13 @@ import (
 // receive path (stealth match, amount decrypt, commitment + concealing checks)
 // against the send path.
 //
-// Requires the local zano_tx_signed3.bin fixture (not committed); skips otherwise.
+// Uses the committed testdata/zano_tx_signed3.bin fixture.
 func TestScanTxSelfConsistency(t *testing.T) {
 	wallet, err := zanolib.LoadSpendSecret(must(hex.DecodeString("d3604ff3032bbd10c072f8a768e9c2bdab9ef94fb2ed51b81b379289afa09209")), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile("zano_tx_signed3.bin")
+	data, err := os.ReadFile("testdata/zano_tx_signed3.bin")
 	if err != nil {
 		t.Skipf("missing fixture: %s", err)
 	}

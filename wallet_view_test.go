@@ -99,7 +99,7 @@ func TestViewOnlyScanMatchesFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile("zano_tx_signed3.bin")
+	data, err := os.ReadFile("testdata/zano_tx_signed3.bin")
 	if err != nil {
 		t.Skipf("missing fixture: %s", err)
 	}
