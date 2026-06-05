@@ -15,6 +15,7 @@ import (
 type Deposit struct {
 	Height      uint64
 	TxId        string
+	TxPubKey    zanobase.Value256       // tx public key of the depositing tx (real_out_tx_key for spending)
 	GlobalIndex uint64                  // chain-assigned global output index (0 if unavailable)
 	PaymentId   []byte                  // integrated-address payment id, if the tx carried one
 	Out         *zanolib.ReceivedOutput // decoded amount, asset, blinding masks, stealth address
@@ -123,6 +124,7 @@ func (s *Scanner) scanBlock(ctx context.Context, blk *BlockDetails, fn func(Depo
 			dep := Deposit{
 				Height:    blk.Height,
 				TxId:      txb.Id,
+				TxPubKey:  res.TxPubKey,
 				PaymentId: res.PaymentId,
 				Out:       out,
 			}

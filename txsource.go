@@ -34,12 +34,21 @@ type TxSource struct {
 	MsKeysCount                uint64            // size_t
 	SeparatelySignedTxComplete bool
 	HtlcOrigin                 string // for htlc, specify origin. len = 1, content = "\x00" ?
-	ephemeral                  *zanobase.KeyPair
+	// unexported fields are not (de)serialized with the FTP blob; they are set
+	// by the in-package transfer builder.
+	assetId   *zanobase.Point // unblinded source asset id (native ⇒ NativeCoinAssetIdPt); for multi-asset txs
+	isZCInput bool            // set when this source is a Zarcanum (post-HF4) output regardless of mask value
+	ephemeral *zanobase.KeyPair
 }
 
-// IsZC returns true if this source is a zero-confidential (ZC) input,
-// determined by checking whether the asset ID blinding mask is non-zero.
+// IsZC returns true if this source is a zero-confidential (ZC) input. A source
+// is ZC if explicitly flagged (IsZCInput, set when built from a Zarcanum output)
+// or, for sources parsed from an unsigned-tx blob, if its asset ID blinding mask
+// is non-zero.
 func (src *TxSource) IsZC() bool {
+	if src.isZCInput {
+		return true
+	}
 	//return !real_out_amount_blinding_mask.is_zero()
 	return src.RealOutAssetIdBlindingMask.Scalar.Equal(zanocrypto.ScZero) == 0
 }
@@ -48,8 +57,15 @@ func (src *TxSource) generateZCSig(rnd io.Reader, tx *zanobase.Transaction, inpu
 	in := zanobase.VariantAs[*zanobase.TxInZcInput](tx.Vin[inputIndex])
 
 	//crypto::point_t asset_id_pt(se.asset_id);
-	assetId := ogc.AssetIds[0].Point // TODO get asset id for source? How?
-	//assetId := edwards25519.NewIdentityPoint()
+	// Each source carries its own unblinded asset id (native or a confidential
+	// asset). Fall back to the first destination asset for single-asset sources
+	// parsed from an unsigned-tx blob that don't set AssetId.
+	var assetId *edwards25519.Point
+	if src.assetId != nil {
+		assetId = src.assetId.Point
+	} else {
+		assetId = ogc.AssetIds[0].Point
+	}
 	//crypto::point_t source_blinded_asset_id = asset_id_pt + se.real_out_asset_id_blinding_mask * crypto::c_point_X; // T_i = H_i + r_i * X
 	sourceBlindedAssetId := new(edwards25519.Point).Add(assetId, new(edwards25519.Point).ScalarMult(src.RealOutAssetIdBlindingMask.Scalar, zanocrypto.C_point_X))
 	//ogc.real_zc_ins_asset_ids.emplace_back(asset_id_pt);

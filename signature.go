@@ -226,22 +226,48 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 		tx.Extra = append(tx.Extra, &zanobase.Variant{Tag: zanobase.TagDerivationHint, Value: []byte{byte(hint & 0xff), byte((hint >> 8) & 0xff)}})
 	}
 
-	// compute total in & total out, compute fee
-	var totalIn, totalOut uint64
+	// Compute the fee as the native-asset surplus, and verify every non-native
+	// asset balances exactly (inputs == outputs). The range/balance/surjection
+	// proofs already aggregate commitments across all assets; the only scalar
+	// fee that goes into the tx is the native one.
+	nativeIn, nativeOut := uint64(0), uint64(0)
+	assetIn := map[string]uint64{}
+	assetOut := map[string]uint64{}
 	for _, src := range ftp.Sources {
-		totalIn += src.Amount
+		if k, native := assetKey(src.assetId); native {
+			nativeIn += src.Amount
+		} else {
+			assetIn[k] += src.Amount
+		}
 	}
 	for _, dst := range ftp.PreparedDestinations {
-		totalOut += dst.Amount
+		if k, native := assetKey(dst.AssetId); native {
+			nativeOut += dst.Amount
+		} else {
+			assetOut[k] += dst.Amount
+		}
+	}
+	for k, in := range assetIn {
+		if assetOut[k] != in {
+			return nil, fmt.Errorf("asset %s unbalanced: in=%d out=%d", k, in, assetOut[k])
+		}
+	}
+	for k, out := range assetOut {
+		if assetIn[k] != out {
+			return nil, fmt.Errorf("asset %s has outputs (%d) with no matching inputs", k, out)
+		}
+	}
+	if nativeOut > nativeIn {
+		return nil, fmt.Errorf("insufficient native funds: out=%d > in=%d", nativeOut, nativeIn)
 	}
 
 	// sort tx.Vin & ftp.Sources by Vin.KeyImage
 	// duplicate ftp
 	sort.Sort(&ftpSrcSorter{tx, ftp})
 
-	if totalIn > totalOut {
+	if nativeIn > nativeOut {
 		// add fee to extras
-		tx.Extra = append(tx.Extra, &zanobase.Variant{Tag: zanobase.TagZarcaniumTxDataV1, Value: &zanobase.ZarcaniumTxDataV1{Fee: totalIn - totalOut}})
+		tx.Extra = append(tx.Extra, &zanobase.Variant{Tag: zanobase.TagZarcaniumTxDataV1, Value: &zanobase.ZarcaniumTxDataV1{Fee: nativeIn - nativeOut}})
 	}
 
 	// generate proofs and signatures
@@ -292,6 +318,19 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 	}
 
 	return res, nil
+}
+
+// assetKey returns a map key for an asset id point and whether it is the native
+// coin. A nil/unset asset id is treated as native (single-asset native txs
+// parsed from an unsigned-tx blob may leave it unset).
+func assetKey(p *zanobase.Point) (string, bool) {
+	if p == nil || p.Point == nil {
+		return "", true
+	}
+	if p.Point.Equal(zanocrypto.NativeCoinAssetIdPt) == 1 {
+		return "", true
+	}
+	return string(p.Point.Bytes()), false
 }
 
 func addRefScalar(v **zanobase.Scalar, a *edwards25519.Scalar) {
