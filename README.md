@@ -162,7 +162,9 @@ Implemented and tested with local in-process peers (`{t,n}`, e.g. 2-of-3):
 - **Threshold key image** — partial key images combine to the same key image for any signing subset (`zanompc.PartialKeyImage`), as Zano's double-spend detection requires.
 - **Threshold CLSAG-GGX signing** — a two-round protocol computes the key image and layer-0 response from the shares; the spend secret is never reconstructed, and the resulting signature verifies with `zanocrypto.VerifyCLSAG_GGX`. It runs over **tss-lib's own transport** (`zanompc.ClsagSigning` uses the same `tss.MessageBroker` / `JsonWrap` / `NewJsonExpect` machinery as `frosttss`), so it plugs into whatever transport you already use for FROST — the X-layer nonce and decoy responses are derived deterministically from the round-1 transcript so every party reaches the identical signature with no coordinator. (`ClsagParty`/`ClsagCoordinator` expose the same math for non-broker drivers.)
 
-Remaining: wiring threshold signing into `Wallet.Sign` (an input-signer interface so a transfer is signed by an MPC session instead of a local key) and an end-to-end threshold-signed broadcast.
+- **Wallet integration** — `Wallet.SignWith(rnd, ftp, oneTimeKey, signer)` signs a transfer through an `InputSigner` interface, so the spend-key operations (key image + CLSAG) are delegated to either a local secret (`LocalInputSigner`, the default `Sign` path) or an MPC session. `zanompc.ThresholdInputSigner` implements that interface over tss-lib's broker: the committee jointly produces each input's key image and signature without reconstructing the spend secret. (Tested concurrently: the threshold key image matches a local signer's and the CLSAG verifies.)
+
+Remaining: an end-to-end threshold-signed broadcast (all committee members running `SignWith` on a shared transaction — needs a shared one-time key and deterministic proof randomness so every party builds the identical tx, plus `frosttss` key import/reshare to put an existing wallet's secret under threshold).
 
 ## License
 

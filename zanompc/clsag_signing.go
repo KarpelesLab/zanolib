@@ -174,7 +174,7 @@ func (s *ClsagSigning) round2(ids []*tss.PartyID, msgs []*clsagRound1msg) {
 
 	// Deterministic per-signature randomness (X-layer nonce + decoys) from the
 	// round-1 transcript: identical for every party, so no coordinator is needed.
-	rnd := s.transcriptReader(r1)
+	rnd := newTranscriptReader(s.sctx.Message, s.sctx.Ring, r1)
 	s.coord = NewClsagCoordinator(rnd, s.sctx.Message, s.sctx.Ring,
 		s.sctx.PseudoOutAmountCommitment, s.sctx.PseudoOutBlindedAssetID,
 		s.sctx.Secret1F, s.sctx.Secret2T, s.sctx.Hi, s.sctx.SpendPub, s.sctx.SecretIndex)
@@ -223,13 +223,14 @@ func (s *ClsagSigning) finalize(ids []*tss.PartyID, msgs []*clsagRound2msg) {
 	sendOnce(&s.doneOnce, s.Done, &ClsagResult{Sig: sig, KeyImage: ki})
 }
 
-// transcriptReader returns a deterministic byte stream seeded by the round-1
-// transcript, used for the non-secret per-signature randomness.
-func (s *ClsagSigning) transcriptReader(r1 []*clsagRound1msg) sha3.ShakeHash {
+// newTranscriptReader returns a deterministic byte stream seeded by the message,
+// ring, and round-1 transcript — used for the non-secret per-signature
+// randomness (X-layer nonce + decoy responses) so all parties agree.
+func newTranscriptReader(msg []byte, ring []zanocrypto.CLSAG_GGXInputRef, r1 []*clsagRound1msg) sha3.ShakeHash {
 	h := sha3.NewLegacyKeccak256()
 	h.Write([]byte("ZANO_THRESHOLD_CLSAG_DETRAND\x00"))
-	h.Write(s.sctx.Message)
-	for _, r := range s.sctx.Ring {
+	h.Write(msg)
+	for _, r := range ring {
 		h.Write(r.StealthAddress.Bytes())
 		h.Write(r.AmountCommitment.Bytes())
 		h.Write(r.BlindedAssetID.Bytes())
