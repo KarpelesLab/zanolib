@@ -160,9 +160,9 @@ Implemented and tested with local in-process peers (`{t,n}`, e.g. 2-of-3):
 
 - **Distributed key generation → address** (`zanompc.Address`).
 - **Threshold key image** — partial key images combine to the same key image for any signing subset (`zanompc.PartialKeyImage`), as Zano's double-spend detection requires.
-- **Threshold CLSAG-GGX signing** — a two-round protocol (`zanompc.ClsagParty` / `zanompc.ClsagCoordinator`) computes the key image and layer-0 response from the shares; the spend secret is never reconstructed. The resulting signature verifies with `zanocrypto.VerifyCLSAG_GGX`.
+- **Threshold CLSAG-GGX signing** — a two-round protocol computes the key image and layer-0 response from the shares; the spend secret is never reconstructed, and the resulting signature verifies with `zanocrypto.VerifyCLSAG_GGX`. It runs over **tss-lib's own transport** (`zanompc.ClsagSigning` uses the same `tss.MessageBroker` / `JsonWrap` / `NewJsonExpect` machinery as `frosttss`), so it plugs into whatever transport you already use for FROST — the X-layer nonce and decoy responses are derived deterministically from the round-1 transcript so every party reaches the identical signature with no coordinator. (`ClsagParty`/`ClsagCoordinator` expose the same math for non-broker drivers.)
 
-Remaining: wiring threshold signing into `Wallet.Sign` (an input-signer interface so a transfer is signed by an MPC session instead of a local key), a networked transport (the tests drive the rounds in-process), and an end-to-end threshold-signed broadcast.
+Remaining: wiring threshold signing into `Wallet.Sign` (an input-signer interface so a transfer is signed by an MPC session instead of a local key) and an end-to-end threshold-signed broadcast.
 
 ## License
 
