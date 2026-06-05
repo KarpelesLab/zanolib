@@ -28,11 +28,20 @@ func (w *Wallet) Sign(rnd io.Reader, ftp *FinalizeTxParam, oneTimeKey *edwards25
 		return nil, errors.New("spend key does not match")
 	}
 
-	if ftp.TxVersion != 2 {
-		// TODO add support for TransactionV3 with HardforkId
+	// Both post-HF4 (v2) and post-HF5 (v3) transactions are supported. The only
+	// difference for the ZC→ZC path is that v3 carries a hardfork_id byte in the
+	// transaction prefix (see zanobase.Transaction serialization); all signing
+	// crypto is identical.
+	switch ftp.TxVersion {
+	case zanobase.TransactionVersionPostHF4, zanobase.TransactionVersionPostHF5:
+		// supported
+	default:
 		return nil, fmt.Errorf("unsupported tx version = %d", ftp.TxVersion)
 	}
-	tx := &zanobase.Transaction{Version: 2}
+	tx := &zanobase.Transaction{Version: zanobase.Varint(ftp.TxVersion)}
+	if ftp.TxVersion >= zanobase.TransactionVersionPostHF5 {
+		tx.HardforkId = uint8(ftp.TxHardforkId)
+	}
 	res := &FinalizedTx{
 		Tx:  tx,
 		FTP: new(FinalizeTxParam),

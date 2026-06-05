@@ -686,6 +686,117 @@ func TestTransactionPrefix(t *testing.T) {
 	}
 }
 
+func TestTransactionPrefixHardforkSerialization(t *testing.T) {
+	mk := func(version uint64, hf uint8) *zanobase.TransactionPrefix {
+		return &zanobase.TransactionPrefix{
+			Version:    zanobase.Varint(version),
+			Vin:        []*zanobase.Variant{zanobase.VariantFor(&zanobase.TxInGen{Height: 7})},
+			Extra:      []*zanobase.Variant{},
+			Vout:       []*zanobase.Variant{},
+			HardforkId: hf,
+		}
+	}
+
+	var v2buf, v3buf bytes.Buffer
+	if err := zanobase.Serialize(&v2buf, mk(zanobase.TransactionVersionPostHF4, 0)); err != nil {
+		t.Fatalf("serialize v2: %v", err)
+	}
+	if err := zanobase.Serialize(&v3buf, mk(zanobase.TransactionVersionPostHF5, 0x09)); err != nil {
+		t.Fatalf("serialize v3: %v", err)
+	}
+	v2, v3 := v2buf.Bytes(), v3buf.Bytes()
+
+	// Per currency::transaction_prefix::BEGIN_SERIALIZE, hardfork_id is the last
+	// prefix field and only present for version >= 3. The version here is a
+	// single-byte varint, so v3 must equal v2 with the version byte changed and a
+	// trailing hardfork_id byte appended.
+	if len(v3) != len(v2)+1 {
+		t.Fatalf("v3 len %d, want v2 len %d + 1", len(v3), len(v2))
+	}
+	if v2[0] != 0x02 || v3[0] != 0x03 {
+		t.Fatalf("version bytes: v2=%#x v3=%#x", v2[0], v3[0])
+	}
+	if !bytes.Equal(v3[1:len(v3)-1], v2[1:]) {
+		t.Fatal("v3 body (between version and trailing hardfork) must equal v2 body")
+	}
+	if v3[len(v3)-1] != 0x09 {
+		t.Fatalf("expected trailing hardfork_id 0x09, got %#x", v3[len(v3)-1])
+	}
+
+	// v2 serialization must ignore HardforkId even when the struct field is set.
+	var v2withHF bytes.Buffer
+	if err := zanobase.Serialize(&v2withHF, mk(zanobase.TransactionVersionPostHF4, 0x55)); err != nil {
+		t.Fatalf("serialize v2 with hf: %v", err)
+	}
+	if !bytes.Equal(v2withHF.Bytes(), v2) {
+		t.Fatal("v2 serialization must not emit HardforkId")
+	}
+
+	// Round-trip the v3 prefix.
+	var decoded zanobase.TransactionPrefix
+	if err := zanobase.Deserialize(bytes.NewReader(v3), &decoded); err != nil {
+		t.Fatalf("deserialize v3: %v", err)
+	}
+	if uint64(decoded.Version) != zanobase.TransactionVersionPostHF5 {
+		t.Errorf("version: got %d", decoded.Version)
+	}
+	if decoded.HardforkId != 0x09 {
+		t.Errorf("hardfork_id: got %#x", decoded.HardforkId)
+	}
+	if len(decoded.Vin) != 1 {
+		t.Errorf("expected 1 vin, got %d", len(decoded.Vin))
+	}
+}
+
+func TestTransactionHardforkRoundTrip(t *testing.T) {
+	mk := func(version uint64, hf uint8) *zanobase.Transaction {
+		return &zanobase.Transaction{
+			Version:    zanobase.Varint(version),
+			Vin:        []*zanobase.Variant{},
+			Extra:      []*zanobase.Variant{zanobase.VariantFor(&zanobase.ZarcaniumTxDataV1{Fee: 1234})},
+			Vout:       []*zanobase.Variant{},
+			HardforkId: hf,
+			Attachment: []*zanobase.Variant{},
+			Signatures: []*zanobase.Variant{},
+			Proofs:     []*zanobase.Variant{},
+		}
+	}
+
+	for _, tc := range []struct {
+		ver uint64
+		hf  uint8
+	}{
+		{zanobase.TransactionVersionPostHF4, 0},
+		{zanobase.TransactionVersionPostHF5, 4},
+	} {
+		var buf bytes.Buffer
+		if err := zanobase.Serialize(&buf, mk(tc.ver, tc.hf)); err != nil {
+			t.Fatalf("ver %d: serialize: %v", tc.ver, err)
+		}
+		r := bytes.NewReader(buf.Bytes())
+		var decoded zanobase.Transaction
+		if err := zanobase.Deserialize(r, &decoded); err != nil {
+			t.Fatalf("ver %d: deserialize: %v", tc.ver, err)
+		}
+		if r.Len() != 0 {
+			t.Errorf("ver %d: %d trailing bytes after deserialize", tc.ver, r.Len())
+		}
+		if uint64(decoded.Version) != tc.ver {
+			t.Errorf("ver %d: got version %d", tc.ver, decoded.Version)
+		}
+		wantHF := uint8(0)
+		if tc.ver >= zanobase.TransactionVersionPostHF5 {
+			wantHF = tc.hf
+		}
+		if decoded.HardforkId != wantHF {
+			t.Errorf("ver %d: hardfork_id got %d, want %d", tc.ver, decoded.HardforkId, wantHF)
+		}
+		if fee, ok := decoded.GetFee(); !ok || fee != 1234 {
+			t.Errorf("ver %d: fee got %d (ok=%v)", tc.ver, fee, ok)
+		}
+	}
+}
+
 func TestVarintReadUnexpectedEOF(t *testing.T) {
 	// A varint with continuation bit set but no more data
 	data := []byte{0x80}
