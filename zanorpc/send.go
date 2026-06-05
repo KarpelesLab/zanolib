@@ -114,7 +114,9 @@ func (c *Client) SendRawTx(ctx context.Context, raw []byte) (string, error) {
 // binURL derives the daemon's binary endpoint for a method from the JSON-RPC
 // Endpoint, e.g. ".../chain/zano/rpc" -> ".../chain/zano/raw/<method>.bin".
 func (c *Client) binURL(method string) string {
-	base := strings.TrimSuffix(c.Endpoint, "/rpc")
+	// Strip any trailing slash, then the trailing "/rpc" segment (TrimSuffix is
+	// suffix-only, so the "rpc." in the hostname is unaffected).
+	base := strings.TrimSuffix(strings.TrimRight(c.Endpoint, "/"), "/rpc")
 	return base + "/raw/" + method + ".bin"
 }
 

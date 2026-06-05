@@ -37,3 +37,17 @@ func TestBuildDecoyOffsets(t *testing.T) {
 		t.Error("expected error when realIndex < ringSize-1")
 	}
 }
+
+func TestBinURL(t *testing.T) {
+	cases := map[string]string{
+		"https://rpc.modchain.net/chain/zano/rpc":  "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin",
+		"https://rpc.modchain.net/chain/zano/rpc/": "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin",
+		"https://rpc.modchain.net/chain/zano":      "https://rpc.modchain.net/chain/zano/raw/getrandom_outs3.bin",
+	}
+	for ep, want := range cases {
+		c := &Client{Endpoint: ep}
+		if got := c.binURL("getrandom_outs3"); got != want {
+			t.Errorf("binURL(%q) = %q, want %q", ep, got, want)
+		}
+	}
+}
