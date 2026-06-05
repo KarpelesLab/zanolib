@@ -283,3 +283,96 @@ func GenerateCLSAG_GGX(
 
 	return sig, nil
 }
+
+// VerifyCLSAG_GGX verifies a CLSAG-GGX ring signature: it recomputes the ring of
+// challenges from the signature's responses and public ring/key-image data and
+// checks that the ring closes (c wraps back to sig.C). The inputs must match
+// those given to GenerateCLSAG_GGX (message, ring, key image, pseudo-outs).
+func VerifyCLSAG_GGX(
+	m []byte,
+	ring []CLSAG_GGXInputRef,
+	ki *edwards25519.Point,
+	pseudoOutAmountCommitment, pseudoOutBlindedAssetID *edwards25519.Point,
+	sig *zanobase.CLSAG_Sig,
+) (bool, error) {
+	ringSize := len(ring)
+	if ringSize == 0 {
+		return false, errors.New("ring size is zero")
+	}
+	if sig == nil || sig.C == nil || sig.K1 == nil || sig.K2 == nil ||
+		len(sig.Rg) != ringSize || len(sig.Rx) != ringSize {
+		return false, errors.New("malformed signature")
+	}
+
+	K1 := new(edwards25519.Point).ScalarMult(ScalarInt(8), sig.K1.Point)
+	K2 := new(edwards25519.Point).ScalarMult(ScalarInt(8), sig.K2.Point)
+
+	// input_hash = Hs(m, [ring i: sa, ac, baid], 1/8*pseudoAC, 1/8*pseudoBAID, ki, K1_div8, K2_div8)
+	hsc := NewHashHelper()
+	hsc.AddBytesModL(m)
+	for i := 0; i < ringSize; i++ {
+		hsc.Add(ring[i].StealthAddress)
+		hsc.Add(ring[i].AmountCommitment)
+		hsc.Add(ring[i].BlindedAssetID)
+	}
+	hsc.Add(new(edwards25519.Point).ScalarMult(Sc1div8, pseudoOutAmountCommitment))
+	hsc.Add(new(edwards25519.Point).ScalarMult(Sc1div8, pseudoOutBlindedAssetID))
+	hsc.Add(ki)
+	hsc.Add(sig.K1.Point)
+	hsc.Add(sig.K2.Point)
+	inputHash := hsc.CalcRawHash()
+
+	hsc.AddBytes(CRYPTO_HDS_CLSAG_GGX_LAYER_0)
+	hsc.AddBytes(inputHash)
+	aggCoeff0 := hsc.CalcHash()
+	hsc.AddBytes(CRYPTO_HDS_CLSAG_GGX_LAYER_1)
+	hsc.AddBytes(inputHash)
+	aggCoeff1 := hsc.CalcHash()
+	hsc.AddBytes(CRYPTO_HDS_CLSAG_GGX_LAYER_2)
+	hsc.AddBytes(inputHash)
+	aggCoeff2 := hsc.CalcHash()
+
+	// Aggregated public keys per ring member and aggregated key images.
+	WpubG := make([]*edwards25519.Point, ringSize)
+	WpubX := make([]*edwards25519.Point, ringSize)
+	for i := 0; i < ringSize; i++ {
+		Ai := new(edwards25519.Point).ScalarMult(ScalarInt(8), ring[i].AmountCommitment)
+		Qi := new(edwards25519.Point).ScalarMult(ScalarInt(8), ring[i].BlindedAssetID)
+		term1 := new(edwards25519.Point).ScalarMult(aggCoeff0, ring[i].StealthAddress)
+		term2 := new(edwards25519.Point).ScalarMult(aggCoeff1, new(edwards25519.Point).Subtract(Ai, pseudoOutAmountCommitment))
+		WpubG[i] = new(edwards25519.Point).Add(term1, term2)
+		WpubX[i] = new(edwards25519.Point).ScalarMult(aggCoeff2, new(edwards25519.Point).Subtract(Qi, pseudoOutBlindedAssetID))
+	}
+	WkeyImageG := new(edwards25519.Point).Add(
+		new(edwards25519.Point).ScalarMult(aggCoeff0, ki),
+		new(edwards25519.Point).ScalarMult(aggCoeff1, K1),
+	)
+	WkeyImageX := new(edwards25519.Point).ScalarMult(aggCoeff2, K2)
+
+	// Walk the ring from c[0] = sig.C and check it closes back to sig.C.
+	c := new(edwards25519.Scalar).Set(sig.C.Scalar)
+	for i := 0; i < ringSize; i++ {
+		hpI := Hp(ring[i].StealthAddress.Bytes())
+		h := NewHashHelper()
+		h.AddBytes(CRYPTO_HDS_CLSAG_GGX_CHALLENGE)
+		h.AddBytes(inputHash)
+		// 1) r_g[i]*G + c*WpubG[i]
+		h.Add(new(edwards25519.Point).Add(
+			new(edwards25519.Point).ScalarMult(sig.Rg[i].Scalar, C_point_G),
+			new(edwards25519.Point).ScalarMult(c, WpubG[i])))
+		// 2) r_g[i]*Hp + c*WkeyImageG
+		h.Add(new(edwards25519.Point).Add(
+			new(edwards25519.Point).ScalarMult(sig.Rg[i].Scalar, hpI),
+			new(edwards25519.Point).ScalarMult(c, WkeyImageG)))
+		// 3) r_x[i]*X + c*WpubX[i]
+		h.Add(new(edwards25519.Point).Add(
+			new(edwards25519.Point).ScalarMult(sig.Rx[i].Scalar, C_point_X),
+			new(edwards25519.Point).ScalarMult(c, WpubX[i])))
+		// 4) r_x[i]*Hp + c*WkeyImageX
+		h.Add(new(edwards25519.Point).Add(
+			new(edwards25519.Point).ScalarMult(sig.Rx[i].Scalar, hpI),
+			new(edwards25519.Point).ScalarMult(c, WkeyImageX)))
+		c = h.CalcHash()
+	}
+	return c.Equal(sig.C.Scalar) == 1, nil
+}
