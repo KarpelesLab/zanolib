@@ -29,3 +29,17 @@ jobs:
 
       - name: Format
         run: cargo fmt --check
+
+  docs:
+    name: Docs build (warnings denied)
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings -D rustdoc::broken-intra-doc-links
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the Rust toolchain
+        run: rustup update stable && rustup default stable
+
+      - name: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features
