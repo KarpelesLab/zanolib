@@ -1,6 +1,9 @@
-[![Rust](https://github.com/KarpelesLab/zanolib/actions/workflows/rust.yml/badge.svg)](https://github.com/KarpelesLab/zanolib/actions/workflows/rust.yml)
-
 # zanolib
+
+[![Rust](https://github.com/KarpelesLab/zanolib/actions/workflows/rust.yml/badge.svg)](https://github.com/KarpelesLab/zanolib/actions/workflows/rust.yml)
+[![crates.io](https://img.shields.io/crates/v/zanolib.svg)](https://crates.io/crates/zanolib)
+[![docs.rs](https://img.shields.io/docsrs/zanolib)](https://docs.rs/zanolib)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Rust library for [Zano](https://zano.org/) cryptocurrency operations, including address parsing, offline transaction signing, deposit scanning, and zero-knowledge proof generation.
 
