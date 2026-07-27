@@ -176,8 +176,8 @@ This crate replaces a Go implementation, removed once the port was complete (it 
 - **End-to-end signing** (`tests/sign_scan.rs`) — a committed `finalized_tx` fixture is decrypted, re-signed with a fixed RNG, and the resulting 7,285-byte transaction (prefix + CLSAG signatures + range, surjection and balance proofs) is compared against a stored fingerprint. That fingerprint is the transaction the Go implementation this crate replaces produced from the same inputs, so it pins the port to the behaviour that was in production.
 
 ```
-make test    # cargo test --all-features
-make lint    # cargo clippy --all-targets --all-features
+cargo test --all-features
+cargo test --no-default-features
 ```
 
 ## License
