@@ -1,0 +1,43 @@
+[package]
+name = "zanolib"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Zano wallet library: address handling, transaction parsing/signing, deposit scanning and threshold (MPC) signing."
+repository = "https://github.com/ModChain/zanolib"
+license = "MIT"
+keywords = ["zano", "cryptonote", "wallet", "cryptography"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+name = "zanolib"
+
+[features]
+default = ["rpc", "mpc"]
+# JSON-RPC / .bin daemon client and the deposit scanner built on it.
+rpc = ["dep:rsurl", "dep:base64"]
+# Threshold (FROST) spend key: DKG-backed key images and CLSAG signing.
+mpc = ["dep:tsslib"]
+
+[dependencies]
+purecrypto = { version = "0.6.28", features = [
+    "std",
+    "hash",
+    "cipher",
+    "rng",
+    "hazmat-edwards25519",
+] }
+tsslib = { version = "0.2.6", default-features = false, features = [
+    "frosttss",
+], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+hex = "0.4"
+# Pure-Rust HTTP client (the same stack the other KarpelesLab crates use).
+rsurl = { version = "0.1", optional = true }
+base64 = { version = "0.22", optional = true }
+
+[dev-dependencies]
+hex = "0.4"
+# Used by the integration tests to fingerprint signed transactions.
+purecrypto = { version = "0.6.28", features = ["std", "hash"] }

@@ -1,0 +1,37 @@
+{
+ "coinbase_v3": {
+  "id": "5412e0a8a4d8eb4394eeea4ec6b821c5b920f21d6c7903d3bfa4692994efea00",
+  "height": 3714400,
+  "blob_size": 1335,
+  "version": 3,
+  "extra": [
+   "pub_key",
+   "user_data",
+   "extra_padding",
+   "derivation_hint",
+   "derivation_hint",
+   "unlock_time"
+  ],
+  "vout": [
+   "tx_out_zarcanum",
+   "tx_out_zarcanum"
+  ]
+ },
+ "transfer_v3": {
+  "id": "0d1dc9acc18202344a69e1a62ead03e3ae1d5fd7a316c9a6172db57accaf8d00",
+  "height": 3713900,
+  "blob_size": 3188,
+  "version": 3,
+  "extra": [
+   "pub_key",
+   "etc_tx_flags16",
+   "derivation_hint",
+   "derivation_hint",
+   "zarcanum_tx_data_v1"
+  ],
+  "vout": [
+   "tx_out_zarcanum",
+   "tx_out_zarcanum"
+  ]
+ }
+}
