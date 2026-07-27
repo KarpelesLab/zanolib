@@ -165,9 +165,9 @@ checksum = "d1cb5dfb8105dda8e22ce97dd4aeb153f8343d38a4d660ee9a40a53b72041925"
 
 [[package]]
 name = "purecrypto"
-version = "0.6.28"
+version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0583b39b21c1e5223a5d5c55d6cd36a54d5ed7aac8ef20c4b3b29df2f45b739f"
+checksum = "f39562bd8eaad7acdf4469e572786a4dfa00abed352aa890a63f7b2940e2174b"
 dependencies = [
  "cacrt",
  "compcol 0.4.7",
@@ -300,9 +300,9 @@ dependencies = [
 
 [[package]]
 name = "tsslib"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed4b1297f8a957980fbdafa27eb0b2c281813b01cd208ed322f33105bd7967b1"
+checksum = "5507fa8c5933cf96905a0e003d8c63dc85262273a34536bcb9c8ba24c009fad1"
 dependencies = [
  "base64",
  "hex",

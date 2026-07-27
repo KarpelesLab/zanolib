@@ -27,7 +27,7 @@ purecrypto = { version = "0.6.28", features = [
     "rng",
     "hazmat-edwards25519",
 ] }
-tsslib = { version = "0.2.6", default-features = false, features = [
+tsslib = { version = "0.2.7", default-features = false, features = [
     "frosttss",
 ], optional = true }
 serde = { version = "1", features = ["derive"] }

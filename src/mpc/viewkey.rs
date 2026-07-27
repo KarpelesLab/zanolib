@@ -1,87 +1,66 @@
 //! A deterministic view key for a threshold wallet.
 
-use super::sign::{combine_points, partial_key_image};
 use super::signer::ThresholdInputSigner;
-use super::transport::exchange;
-use crate::crypto::{Point, Scalar, hash_to_scalar, hp};
+use crate::crypto::{Point, Scalar};
 use crate::error::Result;
-use serde::{Deserialize, Serialize};
+use purecrypto::hash::HashAlgorithm;
 
-/// Domain separator for the view-key base point.
-const VIEW_KEY_BASE_DOMAIN: &[u8] = b"ZANO_THRESHOLD_VIEWKEY\x00";
-/// Domain separator for the final view secret.
-const VIEW_KEY_SECRET_DOMAIN: &[u8] = b"ZANO_THRESHOLD_VIEWKEY_SECRET\x00";
-
-/// One party's contribution `w_i*P` to the deterministic view key derivation.
-#[derive(Clone, Serialize, Deserialize)]
-struct ViewKeyMsg {
-    /// `w_i * P`, hex.
-    partial: String,
-}
-
-/// The fixed base point `P = Hp("ZANO_THRESHOLD_VIEWKEY\0" || spendPub)` used to
-/// derive the deterministic threshold view secret.
+/// The key-image identifier the view secret is derived under.
 ///
-/// It is a pure function of the group spend public key, so every committee
-/// member computes the same `P`. Both the base point and the final scalar are
-/// domain-separated, so the derived value can never collide with — or be linked
-/// to — a real on-chain key image (whose base is `Hp(stealth_address)`, with no
-/// prefix).
-pub fn view_key_base(spend_pub: &Point) -> Point {
-    let mut buf = VIEW_KEY_BASE_DOMAIN.to_vec();
-    buf.extend_from_slice(&spend_pub.compress());
-    hp(&buf)
-}
+/// Distinct identifiers give unlinkable secrets from the same shares, so this
+/// label is what separates the view key from any other value a committee might
+/// derive with the same ceremony.
+pub const VIEW_KEY_IDENTIFIER: &[u8] = b"ZANO_THRESHOLD_VIEWKEY";
+
+/// Keccak-256, matching the hash Zano uses everywhere else.
+const VIEW_KEY_HASH: HashAlgorithm = HashAlgorithm::Keccak256;
 
 impl ThresholdInputSigner {
     /// Derives the wallet's view secret key deterministically from the shared
     /// spend secret `x`, without anyone reconstructing `x`.
     ///
-    /// It computes the "key image" `V = x*P` of the fixed base point
-    /// `P = view_key_base(spendPub)` — a deterministic PRF on `x` — by summing
-    /// every party's partial `w_i*P` over the broker, then hashes `V` to a
-    /// scalar (the same unclamped Keccak-to-scalar convention Zano uses for
-    /// view keys):
+    /// Zano's usual `view = keccak(spend_secret)` cannot run under MPC, so the
+    /// committee instead runs tsslib's threshold key-image ceremony — a
+    /// distributed PRF — over [`VIEW_KEY_IDENTIFIER`]: each party contributes
+    /// `W_i = λ_i·s_i·P` for a point `P` bound to the identifier and the group
+    /// public key, the partials sum to `V = x·P`, and the secret is
+    /// `HashToScalar(identifier, V)`. The shared secret never assembles, every
+    /// party learns the identical value, and each partial carries a DLEQ proof
+    /// so a wrong contribution is caught and its sender named.
     ///
-    /// ```text
-    /// view_secret = HashToScalar("ZANO_THRESHOLD_VIEWKEY_SECRET\0" || V)
-    /// ```
+    /// Partials travel point-to-point, never broadcast: `t+1` of them
+    /// reconstruct `V`, so the ceremony depends on the per-recipient
+    /// confidentiality the broker contract requires.
     ///
-    /// The result is identical on every committee member and reproducible from
-    /// the same key shares, so a threshold wallet has a stable view key (and
-    /// therefore a stable address) with no random value and no out-of-band
-    /// agreement. The matching view public key is `view_secret*G`.
+    /// The result is stable across runs and across any qualifying committee, so
+    /// a threshold wallet has a fixed view key — and therefore a fixed address —
+    /// with no random value and no out-of-band agreement. The matching view
+    /// public key is `view_secret*G`; see [`ThresholdInputSigner::derive_view_keys`].
     ///
-    /// Call this once per signer; it uses its own broker topic and does not
-    /// disturb the key-image / signature pairing.
+    /// Every committee member must call this, and it must not run concurrently
+    /// with a signing session on the same broker.
     pub fn derive_view_secret(&self) -> Result<Scalar> {
-        let p = view_key_base(&self.spend_pub_key());
+        let party = self
+            .subset()
+            .new_key_image(
+                VIEW_KEY_IDENTIFIER.to_vec(),
+                self.params().clone(),
+                VIEW_KEY_HASH,
+            )
+            .map_err(|e| crate::err!("zanompc: view key ceremony: {e}"))?;
+        let res = party
+            .wait()
+            .map_err(|e| crate::err!("zanompc: view key ceremony: {e}"))?;
+        // Note: `res.public_key` is the *child spend* key (group_pub + secret*G)
+        // the ceremony defines for tweaked signing — not the Zano view key.
+        Ok(res.secret)
+    }
 
-        let my_partial = partial_key_image(self.subset(), &p)?;
-        let collected: Vec<ViewKeyMsg> = exchange(
-            self.params(),
-            "zano:viewkey",
-            &ViewKeyMsg {
-                partial: hex::encode(my_partial.compress()),
-            },
-        )?;
-
-        let mut partials = Vec::with_capacity(collected.len());
-        for (i, m) in collected.iter().enumerate() {
-            let raw = hex::decode(&m.partial)
-                .map_err(|e| crate::err!("zanompc: bad view-key partial from party {i}: {e}"))?;
-            partials.push(
-                crate::crypto::point_from_bytes(&raw).map_err(|e| {
-                    crate::err!("zanompc: bad view-key partial from party {i}: {e}")
-                })?,
-            );
-        }
-
-        // V = sum_j(w_j*P) = x*P
-        let v = combine_points(&partials);
-
-        let mut buf = VIEW_KEY_SECRET_DOMAIN.to_vec();
-        buf.extend_from_slice(&v.compress());
-        Ok(hash_to_scalar(&buf))
+    /// [`ThresholdInputSigner::derive_view_secret`] plus the matching view
+    /// public key `view_secret*G`, which is what goes into the address.
+    pub fn derive_view_keys(&self) -> Result<(Scalar, Point)> {
+        let secret = self.derive_view_secret()?;
+        let public = Point::mul_base(&secret);
+        Ok((secret, public))
     }
 }

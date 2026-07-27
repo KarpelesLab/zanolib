@@ -441,8 +441,27 @@ fn threshold_input_signer_runs_the_whole_committee_concurrently() {
     }
 }
 
+/// Runs the view-key ceremony across `committee`, one thread per party, and
+/// returns what each of them derived.
+fn derive_view_secrets(committee: &[&Key], ids: &[PartyId], t: usize) -> Vec<(Scalar, Point)> {
+    let hub = TestHub::new(committee.len());
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..committee.len())
+            .map(|i| {
+                let params = Parameters::new(ids.to_vec(), &ids[i], t, hub.broker(i));
+                let key = committee[i].clone();
+                scope.spawn(move || {
+                    let signer = ThresholdInputSigner::new(params, &key).expect("signer");
+                    signer.derive_view_keys().expect("derive view keys")
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    })
+}
+
 #[test]
-fn deterministic_view_secret_is_identical_across_parties() {
+fn deterministic_view_secret_is_identical_across_parties_and_committees() {
     const N: usize = 3;
     const T: usize = 1;
     let keys = run_dkg(N, T);
@@ -455,44 +474,46 @@ fn deterministic_view_secret_is_identical_across_parties() {
         0,
     );
 
-    let hub = TestHub::new(N);
-    let secrets: Vec<Scalar> = std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..N)
-            .map(|i| {
-                let params = Parameters::new(ids.clone(), &ids[i], T, hub.broker(i));
-                let key = keys[i].clone();
-                scope.spawn(move || {
-                    let signer = ThresholdInputSigner::new(params, &key).expect("signer");
-                    signer.derive_view_secret().expect("derive view secret")
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-
-    for s in &secrets[1..] {
+    // Every party of the full committee derives the same secret...
+    let all: Vec<&Key> = keys.iter().collect();
+    let full = derive_view_secrets(&all, &ids, T);
+    for (s, p) in &full[1..] {
         assert_eq!(
             s.to_bytes(),
-            secrets[0].to_bytes(),
+            full[0].0.to_bytes(),
             "parties derived different view secrets"
         );
+        assert_eq!(p, &full[0].1);
     }
-    assert_ne!(secrets[0].to_bytes(), [0u8; 32]);
+    assert_ne!(full[0].0.to_bytes(), [0u8; 32]);
+    assert_eq!(
+        full[0].1,
+        Point::mul_base(&full[0].0),
+        "the view public key must be view_secret*G, not the ceremony's child key"
+    );
 
-    // The base point is a pure function of the spend key, and domain-separated
-    // from a real key image (whose base is Hp(stealth_address), unprefixed).
-    let spend_pub = mpc::spend_public_key(&keys[0].group_public_key).unwrap();
-    let base = mpc::view_key_base(&spend_pub);
-    assert_eq!(base, mpc::view_key_base(&spend_pub));
-    assert_ne!(base, hp(&spend_pub.compress()));
+    // ...a second run of the same ceremony reproduces it...
+    let again = derive_view_secrets(&all, &ids, T);
+    assert_eq!(again[0].0.to_bytes(), full[0].0.to_bytes());
+
+    // ...and so does any other qualifying committee: the key image V = x*P is
+    // committee-independent, which is what gives a threshold wallet a stable
+    // address.
+    let sub_keys = [&keys[0], &keys[1]];
+    let sub_ids: Vec<PartyId> = ids[..2].to_vec();
+    let sub = derive_view_secrets(&sub_keys, &sub_ids, T);
+    assert_eq!(
+        sub[0].0.to_bytes(),
+        full[0].0.to_bytes(),
+        "a t+1 subset derived a different view secret"
+    );
 
     // The derived secret is a canonical scalar usable as a Zano view key.
-    let view_pub = Point::mul_base(&secrets[0]);
-    let addr = mpc::address(&keys[0].group_public_key, &view_pub.compress(), 0).unwrap();
+    let addr = mpc::address(&keys[0].group_public_key, &full[0].1.compress(), 0).unwrap();
     let parsed = zanolib::Address::parse(&addr.to_string()).unwrap();
     assert_eq!(
         point_from_bytes(&parsed.view_key).unwrap(),
-        view_pub,
+        full[0].1,
         "view key must survive the address round-trip"
     );
 }
