@@ -1,10 +1,8 @@
-[![Tests](https://github.com/KarpelesLab/zanolib/actions/workflows/test.yml/badge.svg)](https://github.com/KarpelesLab/zanolib/actions/workflows/test.yml)
+[![Rust](https://github.com/KarpelesLab/zanolib/actions/workflows/rust.yml/badge.svg)](https://github.com/KarpelesLab/zanolib/actions/workflows/rust.yml)
 
 # zanolib
 
 Rust library for [Zano](https://zano.org/) cryptocurrency operations, including address parsing, offline transaction signing, deposit scanning, and zero-knowledge proof generation.
-
-> **Migration note.** This crate is a full port of the original Go implementation, which is still present in this repository while the switch-over completes. The Rust port is byte-for-byte compatible: given the same inputs and randomness it produces the identical signed transaction (see [Verifying the port](#verifying-the-port)). New work should target the Rust crate; the Go tree will be removed.
 
 ## Features
 
@@ -157,7 +155,7 @@ let addr = mpc::address(&key.group_public_key, &view_public_key, 0)?;
 
 The view key is **independent** of the threshold spend key: Zano's `view = keccak(spend)` derivation can't run under MPC because the spend secret is never reconstructed. Instead of supplying a random view key out of band, the committee derives a **deterministic** one from the shares with `ThresholdInputSigner::derive_view_secret()`, which runs tsslib's threshold key-image ceremony — a distributed PRF — under the identifier `ZANO_THRESHOLD_VIEWKEY`: each party contributes `W_i = λ_i·s_i·P` over a point `P` bound to the identifier and the group public key, the partials sum to `V = x·P`, and the view secret is `HashToScalar(identifier, V)` (Keccak-256, matching the rest of Zano). The shared secret never assembles, every party derives the identical value, and each partial carries a DLEQ proof so a wrong contribution is caught and its sender named. Partials travel point-to-point rather than by broadcast, since `t+1` of them would reconstruct `V`. The result is stable across runs *and across any qualifying committee*, so a threshold wallet has a fixed view key and therefore a fixed address. A Zano address is just `(spend_pub, view_pub)`, so this is valid on-chain — at the cost of seed-phrase recovery.
 
-> The derived value differs from the Go implementation's `DeriveViewSecret()`, which hand-rolled the same construction with Zano's own hash-to-point, no DLEQ proofs and broadcast partials — so the two disagree on a threshold wallet's address. Nothing to migrate: no threshold view key was ever deployed from the Go path.
+> The derived value differs from the removed Go implementation's `DeriveViewSecret()`, which hand-rolled the same construction with Zano's own hash-to-point, no DLEQ proofs and broadcast partials. Nothing to migrate: no threshold view key was ever deployed from the Go path.
 
 Implemented and tested with local in-process peers (`{t,n}`, e.g. 2-of-3):
 
@@ -171,11 +169,11 @@ Remaining: an end-to-end threshold-signed broadcast (all committee members runni
 
 ## Verifying the port
 
-The test suite pins the Rust implementation to the reference behaviour at three levels:
+This crate replaces a Go implementation, removed once the port was complete (it remains in the history, last present at `9269204`). The test suite pins the Rust code to that reference behaviour at three levels:
 
 - **Known-answer vectors** (`tests/crypto_vectors.rs`) — ~1,900 vectors for `hash_to_point`, `hash_to_ec`, `hash_to_scalar`, key derivations and key images, carried over from the Go tests (which in turn track Zano's C++ code).
 - **Real mainnet blobs** (`tests/onchain.rs`) — captured coinbase and transfer transactions must parse, re-serialize to the exact same bytes, and hash to their known transaction ids.
-- **End-to-end signing** (`tests/sign_scan.rs`) — a committed `finalized_tx` fixture is decrypted, re-signed with a fixed RNG, and the resulting 7,285-byte transaction (prefix + CLSAG signatures + range, surjection and balance proofs) is compared against a stored fingerprint. That transaction is byte-identical to what the Go implementation produces from the same inputs.
+- **End-to-end signing** (`tests/sign_scan.rs`) — a committed `finalized_tx` fixture is decrypted, re-signed with a fixed RNG, and the resulting 7,285-byte transaction (prefix + CLSAG signatures + range, surjection and balance proofs) is compared against a stored fingerprint. That fingerprint is the transaction the Go implementation this crate replaces produced from the same inputs, so it pins the port to the behaviour that was in production.
 
 ```
 make test    # cargo test --all-features
