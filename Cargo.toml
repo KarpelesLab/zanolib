@@ -8,6 +8,7 @@ repository = "https://github.com/KarpelesLab/zanolib"
 license = "MIT"
 keywords = ["zano", "cryptonote", "wallet", "cryptography"]
 categories = ["cryptography::cryptocurrencies"]
+include = ["/src", "/tests", "/Cargo.toml", "/README.md", "/LICENSE"]
 
 [lib]
 name = "zanolib"
