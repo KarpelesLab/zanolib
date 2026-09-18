@@ -163,7 +163,9 @@ fn reconstruct_secret(committee: &[&Key]) -> Scalar {
     let mut secret = Scalar::ZERO;
     for k in committee {
         let lambda = lagrange_coefficient::<Ed25519>(k.share_id.as_be_bytes(), &ids).unwrap();
-        secret = secret.add(&lambda.mul(&k.xi));
+        // tsslib uses an older purecrypto; convert by the canonical encoding.
+        let term = Scalar::from_bytes_canonical(&lambda.mul(&k.xi).to_bytes()).unwrap();
+        secret = secret.add(&term);
     }
     secret
 }
@@ -276,7 +278,7 @@ fn additive_shares_reconstruct_the_group_secret() {
         .fold(Scalar::ZERO, |a, b| a.add(&b));
     assert_eq!(
         Point::mul_base(&sum),
-        keys[0].group_public_key,
+        mpc::spend_public_key(&keys[0].group_public_key).unwrap(),
         "sum of additive shares must be the group secret"
     );
 

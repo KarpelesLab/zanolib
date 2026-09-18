@@ -25,7 +25,7 @@ pub mod transport;
 pub mod viewkey;
 
 pub use clsag::{ClsagContext, ClsagCoordinator, ClsagParty};
-pub use keygen::{address, spend_public_key, spend_public_key_bytes};
+pub use keygen::{GroupPoint, address, spend_public_key, spend_public_key_bytes};
 pub use sign::{additive_share, combine_points, committee_share_ids, partial_key_image};
 pub use signer::ThresholdInputSigner;
 pub use transport::exchange;

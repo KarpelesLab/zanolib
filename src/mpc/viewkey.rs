@@ -3,7 +3,7 @@
 use super::signer::ThresholdInputSigner;
 use crate::crypto::{Point, Scalar};
 use crate::error::Result;
-use purecrypto::hash::HashAlgorithm;
+use tsslib::tss::HashAlgorithm;
 
 /// The key-image identifier the view secret is derived under.
 ///
@@ -53,7 +53,7 @@ impl ThresholdInputSigner {
             .map_err(|e| crate::err!("zanompc: view key ceremony: {e}"))?;
         // Note: `res.public_key` is the *child spend* key (group_pub + secret*G)
         // the ceremony defines for tweaked signing — not the Zano view key.
-        Ok(res.secret)
+        super::sign::scalar_from_tss(&res.secret)
     }
 
     /// [`ThresholdInputSigner::derive_view_secret`] plus the matching view

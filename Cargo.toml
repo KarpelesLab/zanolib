@@ -18,10 +18,10 @@ default = ["rpc", "mpc"]
 # JSON-RPC / .bin daemon client and the deposit scanner built on it.
 rpc = ["dep:rsurl", "dep:base64"]
 # Threshold (FROST) spend key: DKG-backed key images and CLSAG signing.
-mpc = ["dep:tsslib"]
+mpc = ["dep:tsslib", "dep:purecrypto-tss"]
 
 [dependencies]
-purecrypto = { version = "0.6.28", features = [
+purecrypto = { version = "0.9", features = [
     "std",
     "hash",
     "cipher",
@@ -30,6 +30,12 @@ purecrypto = { version = "0.6.28", features = [
 ] }
 tsslib = { version = "0.2.7", default-features = false, features = [
     "frosttss",
+], optional = true }
+# The purecrypto release tsslib is built on. Its FROST keys expose that
+# version's point and scalar types, so the mpc module names them through this
+# alias and converts to the crate's own purecrypto by their byte encodings.
+purecrypto-tss = { package = "purecrypto", version = "0.6.29", default-features = false, features = [
+    "hazmat-edwards25519",
 ], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -41,4 +47,4 @@ base64 = { version = "0.22", optional = true }
 [dev-dependencies]
 hex = "0.4"
 # Used by the integration tests to fingerprint signed transactions.
-purecrypto = { version = "0.6.28", features = ["std", "hash"] }
+purecrypto = { version = "0.9", features = ["std", "hash"] }

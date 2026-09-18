@@ -5,11 +5,17 @@ use crate::base::Value256;
 use crate::crypto::Point;
 use crate::error::{Error, Result};
 
+/// A FROST group public key, as tsslib's [`Key`](tsslib::frosttss::Key)
+/// holds it. tsslib is built on an older purecrypto than this crate, so this
+/// is a different type from [`Point`]; the functions here convert it by its
+/// canonical encoding.
+pub type GroupPoint = purecrypto_tss::ec::edwards25519::hazmat::EdwardsPoint;
+
 /// The 32-byte Zano spend public key encoding of a FROST group public key.
 ///
 /// FROST encodes points in canonical RFC 8032 form, identical to Zano's
 /// ed25519 point encoding.
-pub fn spend_public_key_bytes(group_pub: &Point) -> Result<Value256> {
+pub fn spend_public_key_bytes(group_pub: &GroupPoint) -> Result<Value256> {
     let enc = group_pub.compress();
     // Validate that it decodes as a canonical ed25519 point.
     Point::decompress(&enc)
@@ -18,7 +24,7 @@ pub fn spend_public_key_bytes(group_pub: &Point) -> Result<Value256> {
 }
 
 /// The threshold spend public key as a curve point.
-pub fn spend_public_key(group_pub: &Point) -> Result<Point> {
+pub fn spend_public_key(group_pub: &GroupPoint) -> Result<Point> {
     let b = spend_public_key_bytes(group_pub)?;
     Point::decompress(&b.0).ok_or(Error::InvalidPoint)
 }
@@ -27,7 +33,7 @@ pub fn spend_public_key(group_pub: &Point) -> Result<Point> {
 /// public key and a view public key.
 ///
 /// `flags` is 0 for a standard wallet or 1 for auditable.
-pub fn address(group_pub: &Point, view_pub: &[u8], flags: u8) -> Result<Address> {
+pub fn address(group_pub: &GroupPoint, view_pub: &[u8], flags: u8) -> Result<Address> {
     let spend = spend_public_key_bytes(group_pub)?;
     if view_pub.len() != 32 {
         return Err(crate::err!(
