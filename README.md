@@ -15,7 +15,7 @@ Rust library for [Zano](https://zano.org/) cryptocurrency operations, including 
 - **Sending** — build, sign and broadcast transactions from scanned deposits (decoy ring selection, multi-asset, fee handling) entirely from the library
 - **Threshold spend key (MPC)** — generate and hold the spend key as {t,n} shares across machines via FROST-ed25519 ([tsslib](https://github.com/KarpelesLab/tsslib-rs)); the secret is never reconstructed
 - **Cryptographic primitives** — CLSAG-GGX ring signatures, Bulletproof+ range proofs, BGE asset surjection proofs, balance proofs
-- **Serialization** — full binary serialization compatible with Zano's C++ implementation, plus the epee portable-storage codec used by the daemon's `.bin` endpoints
+- **Serialization** — full binary serialization compatible with Zano's C++ implementation, plus the epee portable-storage codec used by the daemon's `.bin` endpoints. Every transaction on the chain parses and re-serializes byte-for-byte, from pre-Zarcanum (v1) transparent transactions through post-HF6 (v4) ones, including PoS coinbases, alias registrations, asset operations and gateway transfers
 
 All cryptography comes from [purecrypto](https://github.com/KarpelesLab/purecrypto); there is no foreign code in the dependency tree.
 
@@ -178,7 +178,8 @@ Remaining: an end-to-end threshold-signed broadcast (all committee members runni
 This crate replaces a Go implementation, removed once the port was complete (it remains in the history, last present at `9269204`). The test suite pins the Rust code to that reference behaviour at three levels:
 
 - **Known-answer vectors** (`tests/crypto_vectors.rs`) — ~1,900 vectors for `hash_to_point`, `hash_to_ec`, `hash_to_scalar`, key derivations and key images, carried over from the Go tests (which in turn track Zano's C++ code).
-- **Real mainnet blobs** (`tests/onchain.rs`) — captured coinbase and transfer transactions must parse, re-serialize to the exact same bytes, and hash to their known transaction ids.
+- **Real mainnet blobs** (`tests/onchain.rs`) — captured transactions of every era (v1, PoS coinbase, alias registration, v3 and v4 transfers) must parse, re-serialize to the exact same bytes, and hash to their known transaction ids. The published crate was checked the same way against 1,385 transactions sampled across the whole chain.
+- **Variant round-trips** (`tests/variants.rs`) — the structures no current mainnet transaction exercises (legacy multisig inputs and outputs, asset operations in both shapes, gateway structures, the PoS stake signature) are pinned by round-trip and byte-layout tests.
 - **End-to-end signing** (`tests/sign_scan.rs`) — a committed `finalized_tx` fixture is decrypted, re-signed with a fixed RNG, and the resulting 7,285-byte transaction (prefix + CLSAG signatures + range, surjection and balance proofs) is compared against a stored fingerprint. That fingerprint is the transaction the Go implementation this crate replaces produced from the same inputs, so it pins the port to the behaviour that was in production.
 
 ```
