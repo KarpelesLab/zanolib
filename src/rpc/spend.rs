@@ -19,7 +19,7 @@ pub const RING_SIZE: usize = 16;
 
 /// The hardfork id carried by current (post-HF6) mainnet transactions. The
 /// sweep derives the actual value from the chain height with
-/// [`tx_version_and_hardfork_id`](crate::base::tx_version_and_hardfork_id).
+/// [`crate::base::tx_version_and_hardfork_id`].
 pub const TX_HARDFORK_ID: u64 = 6;
 
 /// The result of [`Client::sweep_to`].
