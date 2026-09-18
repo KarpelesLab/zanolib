@@ -2,7 +2,10 @@
 
 use super::client::Client;
 use super::scanner::Deposit;
-use crate::base::{EpeeWrite, TRANSACTION_VERSION_POST_HF5, Value256};
+use crate::base::{
+    CURRENCY_HF4_MANDATORY_MIN_COINAGE, CURRENCY_TX_PRACTICAL_MAX_INPUTS, EpeeWrite, Value256,
+    tx_version_and_hardfork_id,
+};
 use crate::error::{Error, Result};
 use crate::rng::OsRng;
 use crate::{
@@ -14,8 +17,10 @@ use std::collections::BTreeMap;
 /// (`CURRENCY_HF4_MANDATORY_DECOY_SET_SIZE` = 15 decoys + 1 real).
 pub const RING_SIZE: usize = 16;
 
-/// The hardfork id carried by current (post-HF5) mainnet transactions.
-pub const TX_HARDFORK_ID: u64 = 5;
+/// The hardfork id carried by current (post-HF6) mainnet transactions. The
+/// sweep derives the actual value from the chain height with
+/// [`tx_version_and_hardfork_id`](crate::base::tx_version_and_hardfork_id).
+pub const TX_HARDFORK_ID: u64 = 6;
 
 /// The result of [`Client::sweep_to`].
 pub struct SweepResult {
@@ -34,6 +39,13 @@ impl Client {
     ///
     /// Decoy rings are fetched per input via `getrandom_outs3`. The wallet must
     /// hold the spend secret.
+    ///
+    /// The transaction version and hardfork id follow the chain height
+    /// (mainnet hardfork schedule). If `recipient` is an integrated address its
+    /// payment id travels with the outputs. Every deposit needs
+    /// [`CURRENCY_HF4_MANDATORY_MIN_COINAGE`] confirmations, and at most
+    /// [`CURRENCY_TX_PRACTICAL_MAX_INPUTS`] deposits fit in one transaction;
+    /// split larger sweeps into batches.
     pub fn sweep_to(
         &self,
         wallet: &Wallet,
@@ -45,7 +57,29 @@ impl Client {
         if deposits.is_empty() {
             return Err(Error::msg("no deposits to sweep"));
         }
+        if deposits.len() > CURRENCY_TX_PRACTICAL_MAX_INPUTS {
+            return Err(crate::err!(
+                "{} deposits exceed the {CURRENCY_TX_PRACTICAL_MAX_INPUTS} inputs a transaction can hold; sweep them in batches",
+                deposits.len()
+            ));
+        }
         let addr = Address::parse(recipient).map_err(|e| crate::err!("recipient address: {e}"))?;
+
+        // The next block's height decides the transaction format, and every
+        // referenced output must be old enough by then (the coinage rule;
+        // decoys are older than the real output, so checking it suffices).
+        let next_height = self.get_block_count()?;
+        for d in deposits {
+            let confirmations = next_height.saturating_sub(d.height);
+            if confirmations < CURRENCY_HF4_MANDATORY_MIN_COINAGE {
+                return Err(crate::err!(
+                    "deposit {}:{} has {confirmations} confirmations, {CURRENCY_HF4_MANDATORY_MIN_COINAGE} are required",
+                    d.tx_id,
+                    d.out.output_index
+                ));
+            }
+        }
+        let (version, hardfork_id) = tx_version_and_hardfork_id(next_height);
         let native = native_coin_asset_id();
 
         // Build inputs (fetching a decoy ring for each) and tally per-asset totals.
@@ -83,7 +117,8 @@ impl Client {
             *totals.entry(d.out.asset_id).or_default() += d.out.amount;
         }
 
-        // One destination per asset, all to the recipient; the fee comes off native.
+        // One destination per asset, all to the recipient; the fee comes off
+        // native. (A lone destination is split in two by build_transfer.)
         let mut dests = Vec::new();
         for asset in &asset_order {
             let mut amount = totals[asset];
@@ -104,13 +139,7 @@ impl Client {
         }
 
         let signed = wallet
-            .build_transfer(
-                &mut OsRng,
-                &inputs,
-                &dests,
-                TRANSACTION_VERSION_POST_HF5,
-                TX_HARDFORK_ID,
-            )
+            .build_transfer(&mut OsRng, &inputs, &dests, version, hardfork_id)
             .map_err(|e| crate::err!("build transfer: {e}"))?;
 
         let raw = signed.tx.to_epee_bytes();

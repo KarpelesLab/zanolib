@@ -19,6 +19,38 @@ pub const TRANSACTION_VERSION_POST_HF5: u64 = 3;
 /// payment id, and use their own variant tags.
 pub const TRANSACTION_VERSION_POST_HF6: u64 = 4;
 
+/// `ZANO_HARDFORK_04_AFTER_HEIGHT` on mainnet: Zarcanum is active for blocks
+/// above this height.
+pub const ZANO_HARDFORK_04_AFTER_HEIGHT: u64 = 2_555_000;
+/// `ZANO_HARDFORK_05_AFTER_HEIGHT` on mainnet.
+pub const ZANO_HARDFORK_05_AFTER_HEIGHT: u64 = 3_076_400;
+/// `ZANO_HARDFORK_06_AFTER_HEIGHT` on mainnet.
+pub const ZANO_HARDFORK_06_AFTER_HEIGHT: u64 = 3_833_000;
+
+/// The transaction version and hardfork id a mainnet transaction must carry
+/// to be included in the block at `height` (zano's
+/// `get_tx_version_and_hardfork_id`). For a transaction built now, `height` is
+/// the daemon's block count, i.e. the height of the next block.
+///
+/// Only post-Zarcanum (HF4+) heights are meaningful here: this crate cannot
+/// build earlier transactions.
+pub fn tx_version_and_hardfork_id(height: u64) -> (u64, u64) {
+    if height > ZANO_HARDFORK_06_AFTER_HEIGHT {
+        (TRANSACTION_VERSION_POST_HF6, 6)
+    } else if height > ZANO_HARDFORK_05_AFTER_HEIGHT {
+        (TRANSACTION_VERSION_POST_HF5, 5)
+    } else if height > ZANO_HARDFORK_04_AFTER_HEIGHT {
+        (TRANSACTION_VERSION_POST_HF4, 4)
+    } else {
+        (TRANSACTION_VERSION_PRE_HF4, 3)
+    }
+}
+
+/// `CURRENCY_HF4_MANDATORY_MIN_COINAGE`: every output a transaction references
+/// (real or decoy) must be at least this many blocks deep when the
+/// transaction is mined.
+pub const CURRENCY_HF4_MANDATORY_MIN_COINAGE: u64 = 10;
+
 /// `CURRENCY_TX_MIN_ALLOWED_OUTS`: every non-coinbase transaction needs at
 /// least this many outputs (since HF4).
 pub const CURRENCY_TX_MIN_ALLOWED_OUTS: usize = 2;

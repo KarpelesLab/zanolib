@@ -1,7 +1,7 @@
 //! Building a spend from received outputs.
 
 use crate::address::Address;
-use crate::base::tx::TRANSACTION_VERSION_POST_HF6;
+use crate::base::tx::{CURRENCY_TX_MIN_ALLOWED_OUTS, TRANSACTION_VERSION_POST_HF6};
 use crate::base::types::{AccountPublicAddr, AddressV, Value256};
 use crate::base::variant::Variant;
 use crate::crypto::Scalar;
@@ -155,6 +155,10 @@ impl Wallet {
     /// The fee is implicit: it is the native-asset surplus (native inputs minus
     /// native outputs), so the caller controls it by choosing destination
     /// amounts. Every non-native asset must balance exactly.
+    ///
+    /// A transaction needs at least two outputs, so a single destination is
+    /// split into two outputs to the same recipient with random amounts, as
+    /// zano's wallet does.
     pub fn build_transfer(
         &self,
         rnd: &mut dyn RngCore,
@@ -170,6 +174,9 @@ impl Wallet {
         }
         if inputs.is_empty() {
             return Err(Error::msg("no inputs"));
+        }
+        if dests.is_empty() {
+            return Err(Error::msg("no destinations"));
         }
 
         let mut ftp = FinalizeTxParam {
@@ -222,11 +229,96 @@ impl Wallet {
             });
         }
 
+        let dsts = &mut ftp.prepared_destinations;
+        if dsts.len() < CURRENCY_TX_MIN_ALLOWED_OUTS {
+            let last = dsts.pop().expect("at least one destination");
+            let wanted = CURRENCY_TX_MIN_ALLOWED_OUTS - dsts.len();
+            let chunks = decompose_amount_randomly(last.amount, wanted, rnd);
+            if chunks.len() != wanted {
+                return Err(crate::err!(
+                    "cannot split an amount of {} into {wanted} outputs",
+                    last.amount
+                ));
+            }
+            for amount in chunks {
+                dsts.push(TxDest {
+                    amount,
+                    ..last.clone()
+                });
+            }
+        }
+
         self.sign(rnd, &ftp, None)
     }
+}
+
+/// `CURRENCY_TX_OUTS_RND_SPLIT_DIGITS_TO_KEEP`: how many significant digits
+/// the chunks of a random split keep.
+const CURRENCY_TX_OUTS_RND_SPLIT_DIGITS_TO_KEEP: u32 = 3;
+
+/// zano's `decompose_amount_randomly`: splits `amount` into `n` chunks of
+/// roughly equal size with random variance, each rounded to a few significant
+/// digits so the split is not an obvious fingerprint. Returns no chunks when
+/// `amount < n`.
+fn decompose_amount_randomly(amount: u64, n: usize, rnd: &mut dyn RngCore) -> Vec<u64> {
+    let n = n as u64;
+    if amount < n {
+        return Vec::new();
+    }
+    let boundary = 10u64.pow(CURRENCY_TX_OUTS_RND_SPLIT_DIGITS_TO_KEEP);
+    let mut chunks = Vec::with_capacity(n as usize);
+    let mut remaining = amount;
+    let mut i = 1;
+    while i < n && remaining > 1 {
+        let mut chunk = remaining / (n - i + 1);
+        if chunk > 1 {
+            let mut multiplier = 1u64;
+            while chunk >= boundary {
+                chunk /= 10;
+                multiplier *= 10;
+            }
+            let mut b = [0u8; 8];
+            rnd.fill_bytes(&mut b);
+            chunk = chunk / 2 + u64::from_le_bytes(b) % (chunk + 1);
+            chunk *= multiplier;
+        }
+        remaining -= chunk;
+        chunks.push(chunk);
+        i += 1;
+    }
+    chunks.push(remaining);
+    chunks
 }
 
 fn copy_into(dst: &mut [u8; 32], src: &[u8]) {
     let n = src.len().min(32);
     dst[..n].copy_from_slice(&src[..n]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rng::ShakeRng;
+
+    #[test]
+    fn random_split_preserves_the_amount() {
+        let mut rnd = ShakeRng::new(b"split");
+        for amount in [
+            2u64,
+            3,
+            999,
+            1_000,
+            123_456_789,
+            10_000_000_000_000,
+            u64::MAX,
+        ] {
+            for _ in 0..20 {
+                let chunks = decompose_amount_randomly(amount, 2, &mut rnd);
+                assert_eq!(chunks.len(), 2, "amount {amount}");
+                assert_eq!(chunks.iter().sum::<u64>(), amount);
+                assert!(chunks.iter().all(|c| *c > 0), "{chunks:?}");
+            }
+        }
+        assert!(decompose_amount_randomly(1, 2, &mut rnd).is_empty());
+    }
 }

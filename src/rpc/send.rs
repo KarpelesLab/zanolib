@@ -29,26 +29,99 @@ pub struct OutEntry {
 /// `uint64 + 4*public_key + uint64`.
 const OUT_ENTRY_SIZE: usize = 144;
 
+/// `RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_COINBASE`: the output comes from a
+/// coinbase transaction.
+pub const RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_COINBASE: u64 = 0x1;
+/// `RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_NOT_ALLOWED`: the daemon refused this
+/// offset as a ring member (spent, locked, burned or marked no-mix) and
+/// returned a zeroed entry in its place.
+pub const RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_NOT_ALLOWED: u64 = 0x2;
+/// `RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_POS_COINBASE`: the output comes from a
+/// PoS coinbase transaction.
+pub const RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_POS_COINBASE: u64 = 0x4;
+
+/// How many `getrandom_outs3` round-trips [`Client::get_ring_for_output`]
+/// makes to replace refused decoys before giving up.
+const MAX_RING_ATTEMPTS: usize = 8;
+
 impl Client {
     /// Fetches a ring (the real output plus decoys) for a confidential output
     /// via `getrandom_outs3` on the daemon's binary endpoint — the method
     /// Zano's own send path uses, with client-chosen decoy global offsets.
     ///
     /// `ring_size - 1` distinct random indices strictly below
-    /// `real_global_index` are sampled (so every decoy is an older, valid
+    /// `real_global_index` are sampled (so every decoy is an older
     /// confidential output) alongside the real index itself, so the daemon
     /// returns the real output's public data with the decoys. The caller
     /// locates the real one by global index.
+    ///
+    /// The daemon refuses some offsets (spent, locked, burned or no-mix
+    /// outputs) and returns a zeroed entry flagged
+    /// [`RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_NOT_ALLOWED`] for each; those are
+    /// dropped and replaced with fresh samples. The result is sorted by global
+    /// index.
     pub fn get_ring_for_output(
         &self,
         real_global_index: u64,
         ring_size: usize,
     ) -> Result<Vec<OutEntry>> {
-        let offsets = build_decoy_offsets(real_global_index, ring_size, &mut OsRng)?;
+        let mut offsets = build_decoy_offsets(real_global_index, ring_size, &mut OsRng)?;
+        let mut ring: std::collections::BTreeMap<u64, OutEntry> = Default::default();
+        let mut refused = std::collections::BTreeSet::new();
 
+        for _ in 0..MAX_RING_ATTEMPTS {
+            let entries = self.get_random_outs3(&offsets)?;
+            for (offset, entry) in offsets.iter().zip(entries) {
+                if entry.flags & RANDOM_OUTPUTS_FOR_AMOUNTS_FLAGS_NOT_ALLOWED != 0 {
+                    if *offset == real_global_index {
+                        return Err(crate::err!(
+                            "the daemon refuses output {real_global_index} as a ring member"
+                        ));
+                    }
+                    refused.insert(*offset);
+                    continue;
+                }
+                if entry.global_index != *offset {
+                    return Err(crate::err!(
+                        "getrandom_outs3.bin: asked for output {offset}, got {}",
+                        entry.global_index
+                    ));
+                }
+                ring.insert(*offset, entry);
+            }
+            if ring.len() >= ring_size {
+                return Ok(ring.into_values().collect());
+            }
+
+            // Replace the refused decoys with fresh, untried indices.
+            let missing = ring_size - ring.len();
+            let available = real_global_index - (ring.len() as u64 - 1) - refused.len() as u64;
+            if (missing as u64) > available {
+                return Err(crate::err!(
+                    "not enough usable outputs older than {real_global_index} for {} decoys",
+                    ring_size - 1
+                ));
+            }
+            let mut fresh = std::collections::BTreeSet::new();
+            while fresh.len() < missing {
+                let idx = rand_u64_below(real_global_index, &mut OsRng)?;
+                if !ring.contains_key(&idx) && !refused.contains(&idx) {
+                    fresh.insert(idx);
+                }
+            }
+            offsets = fresh.into_iter().collect();
+        }
+        Err(crate::err!(
+            "could not collect {ring_size} usable ring members for output {real_global_index}"
+        ))
+    }
+
+    /// One `getrandom_outs3` call for explicit global offsets; the entries
+    /// come back in request order, one per offset.
+    fn get_random_outs3(&self, offsets: &[u64]) -> Result<Vec<OutEntry>> {
         let mut dist = Section::new();
         dist.set("amount", 0u64) // 0 => the ZC (post-zarcanum) zone
-            .set("global_offsets", offsets);
+            .set("global_offsets", offsets.to_vec());
         let mut req = Section::new();
         req.set("amounts", vec![dist])
             .set("height_upper_limit", 0u64)
@@ -82,6 +155,13 @@ impl Client {
             ));
         }
 
+        if blob.len() / OUT_ENTRY_SIZE != offsets.len() {
+            return Err(crate::err!(
+                "getrandom_outs3.bin: {} entries for {} offsets",
+                blob.len() / OUT_ENTRY_SIZE,
+                offsets.len()
+            ));
+        }
         Ok(blob.chunks(OUT_ENTRY_SIZE).map(parse_out_entry).collect())
     }
 }
