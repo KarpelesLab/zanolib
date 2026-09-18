@@ -53,7 +53,7 @@ impl ThresholdInputSigner {
             .map_err(|e| crate::err!("zanompc: view key ceremony: {e}"))?;
         // Note: `res.public_key` is the *child spend* key (group_pub + secret*G)
         // the ceremony defines for tweaked signing — not the Zano view key.
-        super::sign::scalar_from_tss(&res.secret)
+        Ok(res.secret)
     }
 
     /// [`ThresholdInputSigner::derive_view_secret`] plus the matching view

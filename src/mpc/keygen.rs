@@ -6,10 +6,8 @@ use crate::crypto::Point;
 use crate::error::{Error, Result};
 
 /// A FROST group public key, as tsslib's [`Key`](tsslib::frosttss::Key)
-/// holds it. tsslib is built on an older purecrypto than this crate, so this
-/// is a different type from [`Point`]; the functions here convert it by its
-/// canonical encoding.
-pub type GroupPoint = purecrypto_tss::ec::edwards25519::hazmat::EdwardsPoint;
+/// holds it.
+pub type GroupPoint = Point;
 
 /// The 32-byte Zano spend public key encoding of a FROST group public key.
 ///

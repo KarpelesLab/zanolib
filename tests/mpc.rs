@@ -163,9 +163,7 @@ fn reconstruct_secret(committee: &[&Key]) -> Scalar {
     let mut secret = Scalar::ZERO;
     for k in committee {
         let lambda = lagrange_coefficient::<Ed25519>(k.share_id.as_be_bytes(), &ids).unwrap();
-        // tsslib uses an older purecrypto; convert by the canonical encoding.
-        let term = Scalar::from_bytes_canonical(&lambda.mul(&k.xi).to_bytes()).unwrap();
-        secret = secret.add(&term);
+        secret = secret.add(&lambda.mul(&k.xi));
     }
     secret
 }

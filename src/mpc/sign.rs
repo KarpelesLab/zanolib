@@ -23,13 +23,7 @@ pub fn additive_share(key: &Key) -> Result<Scalar> {
     let ids = committee_share_ids(key);
     let lambda = lagrange_coefficient::<Ed25519>(key.share_id.as_be_bytes(), &ids)
         .ok_or_else(|| Error::msg("zanompc: duplicate share id in the signing committee"))?;
-    scalar_from_tss(&lambda.mul(&key.xi))
-}
-
-/// Converts a scalar from tsslib's purecrypto release to this crate's.
-pub(crate) fn scalar_from_tss(s: &tsslib::frost::Scalar) -> Result<Scalar> {
-    Scalar::from_bytes_canonical(&s.to_bytes())
-        .ok_or_else(|| Error::msg("zanompc: non-canonical scalar from tsslib"))
+    Ok(lambda.mul(&key.xi))
 }
 
 /// This party's contribution `w_i * base` to a threshold key image.
