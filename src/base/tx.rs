@@ -1,5 +1,6 @@
 //! Transaction structures and their binary layout.
 
+use super::legacy::TxOutBare;
 use super::ser::{EpeeRead, EpeeWrite, Reader, write_vec};
 use super::types::Value256;
 use super::variant::{Variant, tag};
@@ -315,6 +316,50 @@ impl EpeeRead for TxOutGateway {
     }
 }
 
+/// Writes a pre-HF4 (version <= 1) prefix body: `vin`, `vout`, `extra`, with
+/// the outputs as a plain `tx_out_bare` vector — no variant tags, since the
+/// old prefix had no output variant.
+fn write_prefix_v1(vin: &[Variant], vout: &[Variant], extra: &[Variant], out: &mut Vec<u8>) {
+    write_vec(vin, out);
+    append_varint(out, vout.len() as u64);
+    for v in vout {
+        match v {
+            Variant::TxOutBare(o) => o.write_epee(out),
+            // A v1 transaction can hold nothing else; anything here came from
+            // the caller mutating a parsed transaction, so write the tagged
+            // form rather than silently dropping it.
+            other => other.write_epee(out),
+        }
+    }
+    write_vec(extra, out);
+}
+
+/// Reads a pre-HF4 prefix body; see [`write_prefix_v1`].
+fn read_prefix_v1(r: &mut Reader<'_>) -> Result<(Vec<Variant>, Vec<Variant>, Vec<Variant>)> {
+    let vin = r.read_vec()?;
+    let vout = read_vec_untagged(r)?;
+    let extra = r.read_vec()?;
+    Ok((vin, vout, extra))
+}
+
+/// Reads a `tx_out_bare` vector whose elements carry no variant tag.
+fn read_vec_untagged(r: &mut Reader<'_>) -> Result<Vec<Variant>> {
+    let n = r.read_varint()?;
+    if n > crate::base::ser::MAX_VEC_LEN {
+        return Err(crate::err!("slice too large: {n}"));
+    }
+    let mut out = Vec::with_capacity((n as usize).min(1024));
+    for _ in 0..n {
+        out.push(Variant::TxOutBare(TxOutBare::read_epee(r)?));
+    }
+    Ok(out)
+}
+
+/// Whether a transaction of this version uses the pre-HF4 layout.
+fn is_v1(version: u64) -> bool {
+    version <= TRANSACTION_VERSION_PRE_HF4
+}
+
 /// The hashable prefix of a transaction.
 #[derive(Clone, Debug, Default)]
 pub struct TransactionPrefix {
@@ -333,6 +378,10 @@ pub struct TransactionPrefix {
 impl EpeeWrite for TransactionPrefix {
     fn write_epee(&self, out: &mut Vec<u8>) {
         append_varint(out, self.version);
+        if is_v1(self.version) {
+            write_prefix_v1(&self.vin, &self.vout, &self.extra, out);
+            return;
+        }
         write_vec(&self.vin, out);
         write_vec(&self.extra, out);
         write_vec(&self.vout, out);
@@ -344,6 +393,16 @@ impl EpeeWrite for TransactionPrefix {
 impl EpeeRead for TransactionPrefix {
     fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
         let version = r.read_varint()?;
+        if is_v1(version) {
+            let (vin, vout, extra) = read_prefix_v1(r)?;
+            return Ok(TransactionPrefix {
+                version,
+                vin,
+                extra,
+                vout,
+                hardfork_id: 0,
+            });
+        }
         let vin = r.read_vec()?;
         let extra = r.read_vec()?;
         let vout = r.read_vec()?;
@@ -433,6 +492,23 @@ impl Transaction {
     pub fn deserialize_for_scan(buf: &[u8]) -> Result<Transaction> {
         let mut r = Reader::new(buf);
         let version = r.read_varint()?;
+        if is_v1(version) {
+            // A pre-HF4 transaction keeps its attachments after the
+            // signatures, so they have to be read; they are small and
+            // fixed-size, unlike the post-HF4 proofs.
+            let (vin, vout, extra) = read_prefix_v1(&mut r)?;
+            let signatures = read_nlsag_signatures(&mut r)?;
+            return Ok(Transaction {
+                version,
+                vin,
+                extra,
+                vout,
+                hardfork_id: 0,
+                attachment: r.read_vec()?,
+                signatures,
+                proofs: Vec::new(),
+            });
+        }
         let vin = r.read_vec()?;
         let extra = r.read_vec()?;
         let vout = r.read_vec()?;
@@ -466,6 +542,20 @@ impl Transaction {
 impl EpeeWrite for Transaction {
     fn write_epee(&self, out: &mut Vec<u8>) {
         append_varint(out, self.version);
+        if is_v1(self.version) {
+            // The old layout: prefix, then the ring signatures as a plain
+            // vector of vectors, then the attachments.
+            write_prefix_v1(&self.vin, &self.vout, &self.extra, out);
+            append_varint(out, self.signatures.len() as u64);
+            for sig in &self.signatures {
+                match sig {
+                    Variant::NlsagSig(s) => write_vec(s, out),
+                    other => other.write_epee(out),
+                }
+            }
+            write_vec(&self.attachment, out);
+            return;
+        }
         write_vec(&self.vin, out);
         write_vec(&self.extra, out);
         write_vec(&self.vout, out);
@@ -480,6 +570,20 @@ impl EpeeWrite for Transaction {
 impl EpeeRead for Transaction {
     fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
         let version = r.read_varint()?;
+        if is_v1(version) {
+            let (vin, vout, extra) = read_prefix_v1(r)?;
+            let signatures = read_nlsag_signatures(r)?;
+            return Ok(Transaction {
+                version,
+                vin,
+                extra,
+                vout,
+                hardfork_id: 0,
+                attachment: r.read_vec()?,
+                signatures,
+                proofs: Vec::new(),
+            });
+        }
         let vin = r.read_vec()?;
         let extra = r.read_vec()?;
         let vout = r.read_vec()?;
@@ -499,4 +603,17 @@ impl EpeeRead for Transaction {
             proofs: r.read_vec()?,
         })
     }
+}
+
+/// Reads a pre-HF4 signature section: one untagged signature vector per input.
+fn read_nlsag_signatures(r: &mut Reader<'_>) -> Result<Vec<Variant>> {
+    let n = r.read_varint()?;
+    if n > crate::base::ser::MAX_VEC_LEN {
+        return Err(crate::err!("slice too large: {n}"));
+    }
+    let mut out = Vec::with_capacity((n as usize).min(1024));
+    for _ in 0..n {
+        out.push(Variant::NlsagSig(r.read_vec()?));
+    }
+    Ok(out)
 }

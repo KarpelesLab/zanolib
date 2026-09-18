@@ -5,8 +5,10 @@
 //! tags, each type here implements [`EpeeWrite`]/[`EpeeRead`] explicitly, so the
 //! byte layout of every field is visible at the definition site.
 
+pub mod asset;
 pub mod gateway;
 pub mod gencontext;
+pub mod legacy;
 pub mod ser;
 pub mod sig;
 pub mod tx;
@@ -14,16 +16,21 @@ pub mod types;
 pub mod variant;
 pub mod varint;
 
+pub use asset::{AssetDescriptorBase, AssetDescriptorOperation, AssetEtcField};
 pub use gateway::{
     GatewayAddressDescriptorBase, GatewayAddressDescriptorOperation,
     GatewayAddressDescriptorOperationKind, GatewayEtcField, GatewayOwnerKey, GatewayOwnerSignature,
     GatewaySig, Signature64, ZcGwBalanceProof,
 };
 pub use gencontext::GenContext;
-pub use ser::{EpeeRead, EpeeWrite, Reader, write_var_bytes, write_vec};
+pub use legacy::{
+    AccountPublicAddrOld, AliasAddress, ExtraAliasEntry, TxInMultisig, TxOutBare, TxoutTarget,
+};
+pub use ser::{EpeeRead, EpeeWrite, Reader, write_optional, write_var_bytes, write_vec};
 pub use sig::{
-    BgeProof, BppSignature, ClsagSig, GenericDoubleSchnorrSig, UgAggProof, ZcAssetSurjectionProof,
-    ZcBalanceProof, ZcOutsRangeProof, ZcSig,
+    AssetOperationOwnershipProof, AssetOperationOwnershipProofEth, AssetOperationProof, BgeProof,
+    BppSignature, BppeSignature, ClsagGgxxgSig, ClsagSig, GenericDoubleSchnorrSig, UgAggProof,
+    ZarcanumSig, ZcAssetSurjectionProof, ZcBalanceProof, ZcOutsRangeProof, ZcSig,
 };
 pub use tx::{
     CURRENCY_HF4_MANDATORY_MIN_COINAGE, CURRENCY_TX_MAX_ALLOWED_INPUTS,

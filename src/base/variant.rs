@@ -4,9 +4,17 @@
 //! Tag values match the `SET_VARIANT_TAGS` table in zano's
 //! `src/currency_core/currency_basic.h`.
 
-use super::gateway::{GatewayAddressDescriptorOperation, GatewaySig, ZcGwBalanceProof};
+use super::asset::AssetDescriptorOperation;
+use super::gateway::{
+    GatewayAddressDescriptorOperation, GatewaySig, Signature64, ZcGwBalanceProof,
+};
+use super::legacy::{AccountPublicAddrOld, ExtraAliasEntry, TxInMultisig, TxOutBare};
 use super::ser::{EpeeRead, EpeeWrite, MAX_VEC_LEN, Reader, write_var_bytes, write_vec};
-use super::sig::{ZcAssetSurjectionProof, ZcBalanceProof, ZcOutsRangeProof, ZcSig};
+use super::sig::{
+    AssetOperationOwnershipProof, AssetOperationOwnershipProofEth, AssetOperationProof,
+    BppSignature, BppeSignature, ZarcanumSig, ZcAssetSurjectionProof, ZcBalanceProof,
+    ZcOutsRangeProof, ZcSig,
+};
 use super::tx::{
     TRANSACTION_VERSION_POST_HF6, TxInGateway, TxInGen, TxInToKey, TxInZcInput, TxOutGateway,
     TxOutZarcanum,
@@ -21,8 +29,18 @@ pub mod tag {
     pub const GEN: u8 = 0;
     /// `txin_to_key`
     pub const TO_KEY: u8 = 1;
+    /// `txin_multisig`
+    pub const TXIN_MULTISIG: u8 = 2;
+    /// `txout_to_key`
+    pub const TXOUT_TO_KEY: u8 = 3;
+    /// `txout_multisig`
+    pub const TXOUT_MULTISIG: u8 = 4;
     /// `tx_comment`
     pub const COMMENT: u8 = 7;
+    /// `tx_payer_old`
+    pub const PAYER_OLD: u8 = 8;
+    /// a bare `std::string`
+    pub const STRING: u8 = 9;
     /// `tx_crypto_checksum`
     pub const CRYPTO_CHECKSUM: u8 = 10;
     /// derivation hint (2 raw bytes)
@@ -41,6 +59,8 @@ pub mod tag {
     pub const EXTRA_ATTACHMENT_INFO: u8 = 18;
     /// `extra_user_data`
     pub const USER_DATA: u8 = 19;
+    /// `extra_alias_entry_old`
+    pub const EXTRA_ALIAS_ENTRY_OLD: u8 = 20;
     /// `extra_padding`
     pub const EXTRA_PADDING: u8 = 21;
     /// transaction public key
@@ -57,26 +77,50 @@ pub mod tag {
     pub const ETC_TX_TIME: u8 = 27;
     /// bare `uint32_t`
     pub const UINT32: u8 = 28;
+    /// `tx_receiver_old`
+    pub const RECEIVER_OLD: u8 = 29;
     /// `etc_tx_details_unlock_time2` — per-output unlock times
     pub const UNLOCK_TIME2: u8 = 30;
     /// `tx_payer`
     pub const PAYER: u8 = 31;
     /// `tx_receiver`
     pub const RECEIVER: u8 = 32;
+    /// `extra_alias_entry`
+    pub const EXTRA_ALIAS_ENTRY: u8 = 33;
+    /// `tx_out_bare`
+    pub const TX_OUT_BARE: u8 = 36;
     /// `txin_zc_input`
     pub const TXIN_ZC_INPUT: u8 = 37;
     /// `tx_out_zarcanum_v1` — the pre-HF6 output layout.
     pub const TX_OUT_ZARCANUM_V1: u8 = 38;
     /// `zarcanum_tx_data_v1`
     pub const ZARCANUM_TX_DATA_V1: u8 = 39;
+    /// `bpp_signature_serialized`
+    pub const BPP_SIGNATURE: u8 = 40;
+    /// `bppe_signature_serialized`
+    pub const BPPE_SIGNATURE: u8 = 41;
+    /// `NLSAG_sig`
+    pub const NLSAG_SIG: u8 = 42;
     /// `ZC_sig`
     pub const ZC_SIG: u8 = 43;
+    /// `void_sig`
+    pub const VOID_SIG: u8 = 44;
+    /// `zarcanum_sig` — the stake signature of a PoS coinbase
+    pub const ZARCANUM_SIG: u8 = 45;
     /// `zc_asset_surjection_proof`
     pub const ZC_ASSET_SURJECTION_PROOF: u8 = 46;
     /// `zc_outs_range_proof`
     pub const ZC_OUTS_RANGE_PROOF: u8 = 47;
     /// `zc_balance_proof`
     pub const ZC_BALANCE_PROOF: u8 = 48;
+    /// `asset_descriptor_operation`
+    pub const ASSET_DESCRIPTOR_OPERATION: u8 = 49;
+    /// `asset_operation_proof`
+    pub const ASSET_OPERATION_PROOF: u8 = 50;
+    /// `asset_operation_ownership_proof`
+    pub const ASSET_OPERATION_OWNERSHIP_PROOF: u8 = 51;
+    /// `asset_operation_ownership_proof_eth`
+    pub const ASSET_OPERATION_OWNERSHIP_PROOF_ETH: u8 = 52;
     /// `eth_public_key` (33 bytes)
     pub const ETH_PUBLIC_KEY: u8 = 60;
     /// `dummy` — a tag with no payload
@@ -170,10 +214,10 @@ pub struct TxCryptoChecksum {
 /// service attachment with `service_id == "P"`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxServiceAttachment {
-    /// Service identifier.
-    pub service_id: String,
-    /// Service-specific instruction.
-    pub instruction: String,
+    /// Service identifier, as raw bytes (`"P"` for payment ids).
+    pub service_id: Vec<u8>,
+    /// Service-specific instruction, as raw bytes.
+    pub instruction: Vec<u8>,
     /// Payload, possibly encrypted or deflated (see [`TxServiceAttachment::flags`]).
     pub body: Vec<u8>,
     /// Optional public keys the payload is addressed to.
@@ -192,7 +236,7 @@ pub const TX_SERVICE_ATTACHMENT_ENCRYPT_BODY_ISOLATE_AUDITABLE: u8 = 1 << 2;
 pub const TX_SERVICE_ATTACHMENT_ENCRYPT_ADD_PROOF: u8 = 1 << 3;
 
 /// The `service_id` used to carry integrated-address payment IDs.
-pub const PAYMENT_ID_SERVICE_ID: &str = "P";
+pub const PAYMENT_ID_SERVICE_ID: &[u8] = b"P";
 
 /// One entry of a `boost::variant` container (tx inputs, outputs, extra,
 /// attachments, signatures and proofs).
@@ -202,6 +246,22 @@ pub enum Variant {
     Gen(TxInGen),
     /// Legacy transparent input.
     ToKey(TxInToKey),
+    /// Legacy transparent input spending a multisig output.
+    TxInMultisig(TxInMultisig),
+    /// Legacy transparent output.
+    TxOutBare(TxOutBare),
+    /// Encrypted payer address, pre-HF2 form.
+    PayerOld(AccountPublicAddrOld),
+    /// Encrypted receiver address, pre-HF2 form.
+    ReceiverOld(AccountPublicAddrOld),
+    /// A bare string. Kept as raw bytes: zano writes arbitrary payloads here.
+    StringData(Vec<u8>),
+    /// Alias registration or update, pre-HF2 form.
+    ExtraAliasEntryOld(ExtraAliasEntry),
+    /// Alias registration or update.
+    ExtraAliasEntry(ExtraAliasEntry),
+    /// Confidential-asset operation (deploy, emit, update or burn).
+    AssetDescriptorOperation(AssetDescriptorOperation),
     /// Free-form comment.
     Comment(TxComment),
     /// Encrypted key derivation + hash.
@@ -271,6 +331,22 @@ pub enum Variant {
     },
     /// Confidential input signature.
     ZcSig(ZcSig),
+    /// A standalone Bulletproof+ range proof.
+    BppSignature(BppSignature),
+    /// A standalone Bulletproof+ range proof over doubly-blinded commitments.
+    BppeSignature(BppeSignature),
+    /// Legacy (pre-Zarcanum) ring signature: one signature per ring member.
+    NlsagSig(Vec<Signature64>),
+    /// An input that carries no signature of its own.
+    VoidSig,
+    /// The stake signature of a PoS coinbase transaction.
+    ZarcanumSig(Box<ZarcanumSig>),
+    /// Proof that an asset operation's amount commitment is well formed.
+    AssetOperationProof(AssetOperationProof),
+    /// Proof of ownership of the asset an operation touches.
+    AssetOperationOwnershipProof(AssetOperationOwnershipProof),
+    /// The same proof, signed with an ethereum key.
+    AssetOperationOwnershipProofEth(AssetOperationOwnershipProofEth),
     /// Asset surjection proof.
     ZcAssetSurjectionProof(ZcAssetSurjectionProof),
     /// Outputs range proof.
@@ -285,6 +361,14 @@ impl Variant {
         match self {
             Variant::Gen(_) => tag::GEN,
             Variant::ToKey(_) => tag::TO_KEY,
+            Variant::TxInMultisig(_) => tag::TXIN_MULTISIG,
+            Variant::TxOutBare(_) => tag::TX_OUT_BARE,
+            Variant::PayerOld(_) => tag::PAYER_OLD,
+            Variant::ReceiverOld(_) => tag::RECEIVER_OLD,
+            Variant::StringData(_) => tag::STRING,
+            Variant::ExtraAliasEntryOld(_) => tag::EXTRA_ALIAS_ENTRY_OLD,
+            Variant::ExtraAliasEntry(_) => tag::EXTRA_ALIAS_ENTRY,
+            Variant::AssetDescriptorOperation(_) => tag::ASSET_DESCRIPTOR_OPERATION,
             Variant::Comment(_) => tag::COMMENT,
             Variant::CryptoChecksum(_) => tag::CRYPTO_CHECKSUM,
             Variant::DerivationHint(_) => tag::DERIVATION_HINT,
@@ -320,6 +404,14 @@ impl Variant {
             Variant::EtcCoinbaseBlockCumulativeSize(_) => tag::ETC_COINBASE_BLOCK_CUMULATIVE_SIZE,
             Variant::ZarcanumTxDataV1 { .. } => tag::ZARCANUM_TX_DATA_V1,
             Variant::ZcSig(_) => tag::ZC_SIG,
+            Variant::BppSignature(_) => tag::BPP_SIGNATURE,
+            Variant::BppeSignature(_) => tag::BPPE_SIGNATURE,
+            Variant::NlsagSig(_) => tag::NLSAG_SIG,
+            Variant::VoidSig => tag::VOID_SIG,
+            Variant::ZarcanumSig(_) => tag::ZARCANUM_SIG,
+            Variant::AssetOperationProof(_) => tag::ASSET_OPERATION_PROOF,
+            Variant::AssetOperationOwnershipProof(_) => tag::ASSET_OPERATION_OWNERSHIP_PROOF,
+            Variant::AssetOperationOwnershipProofEth(_) => tag::ASSET_OPERATION_OWNERSHIP_PROOF_ETH,
             Variant::ZcAssetSurjectionProof(_) => tag::ZC_ASSET_SURJECTION_PROOF,
             Variant::ZcOutsRangeProof(_) => tag::ZC_OUTS_RANGE_PROOF,
             Variant::ZcBalanceProof(_) => tag::ZC_BALANCE_PROOF,
@@ -331,6 +423,14 @@ impl Variant {
         match self {
             Variant::Gen(_) => "gen",
             Variant::ToKey(_) => "key",
+            Variant::TxInMultisig(_) => "multisig",
+            Variant::TxOutBare(_) => "tx_out_bare",
+            Variant::PayerOld(_) => "payer",
+            Variant::ReceiverOld(_) => "receiver",
+            Variant::StringData(_) => "string",
+            Variant::ExtraAliasEntryOld(_) => "alias_entry",
+            Variant::ExtraAliasEntry(_) => "alias_entry2",
+            Variant::AssetDescriptorOperation(_) => "asset_descriptor_base",
             Variant::Comment(_) => "comment",
             Variant::CryptoChecksum(_) => "checksum",
             Variant::DerivationHint(_) => "derivation_hint",
@@ -364,6 +464,14 @@ impl Variant {
             Variant::EtcCoinbaseBlockCumulativeSize(_) => "etc_coinbase_block_cumulative_size",
             Variant::ZarcanumTxDataV1 { .. } => "zarcanum_tx_data_v1",
             Variant::ZcSig(_) => "ZC_sig",
+            Variant::BppSignature(_) => "bpp_signature_serialized",
+            Variant::BppeSignature(_) => "bppe_signature_serialized",
+            Variant::NlsagSig(_) => "NLSAG_sig",
+            Variant::VoidSig => "void_sig",
+            Variant::ZarcanumSig(_) => "zarcanum_sig",
+            Variant::AssetOperationProof(_) => "asset_operation_proof",
+            Variant::AssetOperationOwnershipProof(_) => "asset_operation_ownership_proof",
+            Variant::AssetOperationOwnershipProofEth(_) => "asset_operation_ownership_proof_eth",
             Variant::ZcAssetSurjectionProof(_) => "zc_asset_surjection_proof",
             Variant::ZcOutsRangeProof(_) => "zc_outs_range_proof",
             Variant::ZcBalanceProof(_) => "zc_balance_proof",
@@ -419,6 +527,12 @@ impl EpeeWrite for Variant {
         match self {
             Variant::Gen(v) => v.write_epee(out),
             Variant::ToKey(v) => v.write_epee(out),
+            Variant::TxInMultisig(v) => v.write_epee(out),
+            Variant::TxOutBare(v) => v.write_epee(out),
+            Variant::PayerOld(v) | Variant::ReceiverOld(v) => v.write_epee(out),
+            Variant::StringData(v) => write_var_bytes(v, out),
+            Variant::ExtraAliasEntryOld(v) | Variant::ExtraAliasEntry(v) => v.write_epee(out),
+            Variant::AssetDescriptorOperation(v) => v.write_epee(out),
             Variant::Comment(v) => write_var_bytes(&v.comment, out),
             Variant::CryptoChecksum(v) => {
                 v.encrypted_key_derivation.write_epee(out);
@@ -426,8 +540,8 @@ impl EpeeWrite for Variant {
             }
             Variant::DerivationHint(v) => write_var_bytes(v, out),
             Variant::ServiceAttachment(v) => {
-                write_var_bytes(v.service_id.as_bytes(), out);
-                write_var_bytes(v.instruction.as_bytes(), out);
+                write_var_bytes(&v.service_id, out);
+                write_var_bytes(&v.instruction, out);
                 write_var_bytes(&v.body, out);
                 write_vec(&v.security, out);
                 out.push(v.flags);
@@ -470,6 +584,14 @@ impl EpeeWrite for Variant {
             Variant::EtcCoinbaseBlockCumulativeSize(v) => append_varint(out, *v),
             Variant::ZarcanumTxDataV1 { fee } => fee.write_epee(out),
             Variant::ZcSig(v) => v.write_epee(out),
+            Variant::BppSignature(v) => v.write_epee(out),
+            Variant::BppeSignature(v) => v.write_epee(out),
+            Variant::NlsagSig(v) => write_vec(v, out),
+            Variant::VoidSig => {}
+            Variant::ZarcanumSig(v) => v.write_epee(out),
+            Variant::AssetOperationProof(v) => v.write_epee(out),
+            Variant::AssetOperationOwnershipProof(v) => v.write_epee(out),
+            Variant::AssetOperationOwnershipProofEth(v) => v.write_epee(out),
             Variant::ZcAssetSurjectionProof(v) => v.write_epee(out),
             Variant::ZcOutsRangeProof(v) => v.write_epee(out),
             Variant::ZcBalanceProof(v) => v.write_epee(out),
@@ -483,6 +605,20 @@ impl EpeeRead for Variant {
         Ok(match t {
             tag::GEN => Variant::Gen(TxInGen::read_epee(r)?),
             tag::TO_KEY => Variant::ToKey(TxInToKey::read_epee(r)?),
+            tag::TXIN_MULTISIG => Variant::TxInMultisig(TxInMultisig::read_epee(r)?),
+            tag::TX_OUT_BARE => Variant::TxOutBare(TxOutBare::read_epee(r)?),
+            tag::PAYER_OLD => Variant::PayerOld(AccountPublicAddrOld::read_epee(r)?),
+            tag::RECEIVER_OLD => Variant::ReceiverOld(AccountPublicAddrOld::read_epee(r)?),
+            tag::STRING => Variant::StringData(r.read_var_bytes()?),
+            tag::EXTRA_ALIAS_ENTRY_OLD => {
+                Variant::ExtraAliasEntryOld(ExtraAliasEntry::read_with(r, true)?)
+            }
+            tag::EXTRA_ALIAS_ENTRY => {
+                Variant::ExtraAliasEntry(ExtraAliasEntry::read_with(r, false)?)
+            }
+            tag::ASSET_DESCRIPTOR_OPERATION => {
+                Variant::AssetDescriptorOperation(AssetDescriptorOperation::read_epee(r)?)
+            }
             tag::COMMENT => Variant::Comment(TxComment {
                 comment: r.read_var_bytes()?,
             }),
@@ -492,8 +628,8 @@ impl EpeeRead for Variant {
             }),
             tag::DERIVATION_HINT => Variant::DerivationHint(r.read_var_bytes()?),
             tag::SERVICE_ATTACHMENT => Variant::ServiceAttachment(TxServiceAttachment {
-                service_id: r.read_var_string()?,
-                instruction: r.read_var_string()?,
+                service_id: r.read_var_bytes()?,
+                instruction: r.read_var_bytes()?,
                 body: r.read_var_bytes()?,
                 security: r.read_vec()?,
                 flags: r.read_byte()?,
@@ -558,6 +694,20 @@ impl EpeeRead for Variant {
                 fee: u64::read_epee(r)?,
             },
             tag::ZC_SIG => Variant::ZcSig(ZcSig::read_epee(r)?),
+            tag::BPP_SIGNATURE => Variant::BppSignature(BppSignature::read_epee(r)?),
+            tag::BPPE_SIGNATURE => Variant::BppeSignature(BppeSignature::read_epee(r)?),
+            tag::NLSAG_SIG => Variant::NlsagSig(r.read_vec()?),
+            tag::VOID_SIG => Variant::VoidSig,
+            tag::ZARCANUM_SIG => Variant::ZarcanumSig(Box::new(ZarcanumSig::read_epee(r)?)),
+            tag::ASSET_OPERATION_PROOF => {
+                Variant::AssetOperationProof(AssetOperationProof::read_epee(r)?)
+            }
+            tag::ASSET_OPERATION_OWNERSHIP_PROOF => {
+                Variant::AssetOperationOwnershipProof(AssetOperationOwnershipProof::read_epee(r)?)
+            }
+            tag::ASSET_OPERATION_OWNERSHIP_PROOF_ETH => Variant::AssetOperationOwnershipProofEth(
+                AssetOperationOwnershipProofEth::read_epee(r)?,
+            ),
             tag::ZC_ASSET_SURJECTION_PROOF => {
                 Variant::ZcAssetSurjectionProof(ZcAssetSurjectionProof::read_epee(r)?)
             }

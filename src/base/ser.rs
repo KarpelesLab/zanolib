@@ -11,10 +11,14 @@ use crate::error::{Error, Result};
 
 use super::varint::append_varint;
 
-/// Maximum element count accepted for a length-prefixed vector.
-pub const MAX_VEC_LEN: u64 = 128;
-/// Maximum byte length accepted for a length-prefixed byte string.
-pub const MAX_BYTES_LEN: u64 = 4096;
+/// Maximum element count accepted for a length-prefixed vector. Generous
+/// enough for the largest structures that can appear on chain (a pre-HF4
+/// transaction could carry `CURRENCY_TX_MAX_ALLOWED_OUTS_PRE_HF4` = 2000
+/// outputs).
+pub const MAX_VEC_LEN: u64 = 4096;
+/// Maximum byte length accepted for a length-prefixed byte string, bounded by
+/// the largest transaction a block can hold.
+pub const MAX_BYTES_LEN: u64 = 128 * 1024;
 
 /// A cursor over an in-memory blob.
 pub struct Reader<'a> {
@@ -101,17 +105,40 @@ impl<'a> Reader<'a> {
         Ok(String::from_utf8_lossy(&self.read_var_bytes()?).into_owned())
     }
 
+    /// Reads a `boost::optional<T>`: a one-byte "is none" flag (1 = absent),
+    /// followed by the value when present.
+    pub fn read_optional<T: EpeeRead>(&mut self) -> Result<Option<T>> {
+        match self.read_byte()? {
+            0 => Ok(Some(T::read_epee(self)?)),
+            1 => Ok(None),
+            other => Err(crate::err!("invalid optional flag {other}")),
+        }
+    }
+
     /// Reads a varint-counted vector.
     pub fn read_vec<T: EpeeRead>(&mut self) -> Result<Vec<T>> {
         let n = self.read_varint()?;
         if n > MAX_VEC_LEN {
             return Err(crate::err!("slice too large: {n} > {MAX_VEC_LEN}"));
         }
-        let mut out = Vec::with_capacity(n as usize);
+        // Every element takes at least one byte, so never reserve for more
+        // elements than the remaining input could possibly hold.
+        let mut out = Vec::with_capacity((n as usize).min(self.buf.len() - self.pos));
         for _ in 0..n {
             out.push(T::read_epee(self)?);
         }
         Ok(out)
+    }
+}
+
+/// Writes a `boost::optional<T>`; see [`Reader::read_optional`].
+pub fn write_optional<T: EpeeWrite>(v: &Option<T>, out: &mut Vec<u8>) {
+    match v {
+        Some(v) => {
+            out.push(0);
+            v.write_epee(out);
+        }
+        None => out.push(1),
     }
 }
 

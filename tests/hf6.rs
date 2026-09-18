@@ -249,8 +249,8 @@ fn scan_decrypts_a_v4_tx_wide_payment_id() {
             Variant::Comment(TxComment { comment }),
         ],
         attachment: vec![Variant::ServiceAttachment(TxServiceAttachment {
-            service_id: PAYMENT_ID_SERVICE_ID.to_string(),
-            instruction: String::new(),
+            service_id: PAYMENT_ID_SERVICE_ID.to_vec(),
+            instruction: Vec::new(),
             body,
             security: Vec::new(),
             flags: TX_SERVICE_ATTACHMENT_ENCRYPT_BODY,
