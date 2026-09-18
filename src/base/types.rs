@@ -93,6 +93,61 @@ impl EpeeRead for Value256 {
     }
 }
 
+/// A destination address: either a regular account or a gateway address id
+/// (`address_v`). Gateway addresses were introduced by HF6.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressV {
+    /// A regular account.
+    Account(AccountPublicAddr),
+    /// A gateway address id.
+    Gateway(Value256),
+}
+
+impl AddressV {
+    /// The wire discriminator for this value.
+    pub fn tag(&self) -> u8 {
+        match self {
+            AddressV::Account(_) => super::variant::tag::ACCOUNT_PUBLIC_ADDRESS,
+            AddressV::Gateway(_) => super::variant::tag::PUB_KEY,
+        }
+    }
+
+    /// Borrows the account keys, if this is a regular account.
+    pub fn as_account(&self) -> Option<&AccountPublicAddr> {
+        match self {
+            AddressV::Account(a) => Some(a),
+            AddressV::Gateway(_) => None,
+        }
+    }
+}
+
+impl From<AccountPublicAddr> for AddressV {
+    fn from(a: AccountPublicAddr) -> AddressV {
+        AddressV::Account(a)
+    }
+}
+
+impl EpeeWrite for AddressV {
+    fn write_epee(&self, out: &mut Vec<u8>) {
+        out.push(self.tag());
+        match self {
+            AddressV::Account(a) => a.write_epee(out),
+            AddressV::Gateway(v) => v.write_epee(out),
+        }
+    }
+}
+impl EpeeRead for AddressV {
+    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(match r.read_byte()? {
+            super::variant::tag::ACCOUNT_PUBLIC_ADDRESS => {
+                AddressV::Account(AccountPublicAddr::read_epee(r)?)
+            }
+            super::variant::tag::PUB_KEY => AddressV::Gateway(Value256::read_epee(r)?),
+            other => return Err(crate::err!("unsupported address_v tag {other}")),
+        })
+    }
+}
+
 /// A Zano account's public keys.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountPublicAddr {

@@ -1,7 +1,8 @@
 //! Building a spend from received outputs.
 
 use crate::address::Address;
-use crate::base::types::{AccountPublicAddr, Value256};
+use crate::base::tx::TRANSACTION_VERSION_POST_HF6;
+use crate::base::types::{AccountPublicAddr, AddressV, Value256};
 use crate::base::variant::Variant;
 use crate::crypto::Scalar;
 use crate::crypto::consts::NATIVE_COIN_ASSET_ID_PT;
@@ -53,6 +54,9 @@ pub struct TransferInput {
 }
 
 /// An output to create: send `amount` of `asset_id` to `address`.
+///
+/// An integrated address' payment id travels with the output (post-HF6
+/// transactions only), so it reaches the recipient.
 #[derive(Clone, Debug)]
 pub struct TransferDest {
     /// Recipient address.
@@ -137,6 +141,7 @@ impl TransferInput {
             separately_signed_tx_complete: false,
             htlc_origin: String::new(),
             asset_id: Some(asset_pt),
+            gateway_origin: Value256::ZERO,
             is_zc_input: true,
             hi: None,
         })
@@ -184,6 +189,7 @@ impl Wallet {
             tx_version: version,
             tx_hardfork_id: hardfork_id,
             mode_separate_fee: 0,
+            layout: Default::default(),
         };
 
         for input in inputs {
@@ -201,10 +207,17 @@ impl Wallet {
             };
             copy_into(&mut acc.spend_key.0, &d.address.spend_key);
             copy_into(&mut acc.view_key.0, &d.address.view_key);
+            let payment_id = d.address.intrinsic_payment_id()?;
+            if payment_id != 0 && version < TRANSACTION_VERSION_POST_HF6 {
+                return Err(Error::msg(
+                    "sending to an integrated address needs a post-HF6 (v4) transaction",
+                ));
+            }
             ftp.prepared_destinations.push(TxDest {
                 amount: d.amount,
-                addr: vec![acc],
+                addr: vec![AddressV::Account(acc)],
                 asset_id: Some(asset_pt),
+                payment_id,
                 ..Default::default()
             });
         }

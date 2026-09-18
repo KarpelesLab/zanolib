@@ -4,8 +4,8 @@ use crate::base::ser::{EpeeRead, EpeeWrite, Reader, write_vec};
 use crate::base::tx::Transaction;
 use crate::base::types::{KeyImageIndex, Value256};
 use crate::crypto::{Scalar, chacha8, chacha8_generate_key};
-use crate::error::{Error, Result};
-use crate::ftp::FinalizeTxParam;
+use crate::error::Result;
+use crate::ftp::{FinalizeTxParam, WalletBlobLayout, try_both_layouts};
 
 /// A constructed (and usually signed) transaction with the parameters it was
 /// built from.
@@ -44,30 +44,31 @@ impl EpeeWrite for FinalizedTx {
 
 impl EpeeRead for FinalizedTx {
     fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+        FinalizedTx::read_with(r, WalletBlobLayout::default())
+    }
+}
+
+impl FinalizedTx {
+    /// Parses the given blob layout.
+    pub fn read_with(r: &mut Reader<'_>, layout: WalletBlobLayout) -> Result<Self> {
         Ok(FinalizedTx {
             tx: Transaction::read_epee(r)?,
             tx_id: Value256::read_epee(r)?,
             one_time_key: Scalar::read_epee(r)?,
-            ftp: FinalizeTxParam::read_epee(r)?,
+            ftp: FinalizeTxParam::read_with(r, layout)?,
             htlc_origin: String::read_epee(r)?,
             outs_key_images: r.read_vec()?,
             derivation: Value256::read_epee(r)?,
             was_not_prepared: bool::read_epee(r)?,
         })
     }
-}
 
-impl FinalizedTx {
-    /// Decrypts `buf` with the given view secret key and parses it.
+    /// Decrypts `buf` with the given view secret key and parses it, trying the
+    /// current blob layout first and the legacy one as a fallback.
     pub fn parse(buf: &[u8], view_secret_key: &[u8]) -> Result<FinalizedTx> {
         let code = chacha8_generate_key(view_secret_key)?;
         let plain = chacha8(&code, &[0u8; 8], buf)?;
-        let mut r = Reader::new(&plain);
-        let res = FinalizedTx::read_epee(&mut r)?;
-        if !r.is_empty() {
-            return Err(Error::msg("trailing data"));
-        }
-        Ok(res)
+        try_both_layouts(&plain, FinalizedTx::read_with)
     }
 
     /// The serialized transaction, ready to broadcast.

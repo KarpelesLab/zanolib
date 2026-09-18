@@ -137,7 +137,7 @@ fn scan_detects_every_own_destination() {
     // Multiset of amounts for destinations addressed to this wallet.
     let mut own: Vec<u64> = Vec::new();
     for dst in &fin.ftp.prepared_destinations {
-        if let Some(addr) = dst.addr.first()
+        if let Some(addr) = dst.addr.first().and_then(|a| a.as_account())
             && addr.spend_key.0 == w.spend_pub_key.compress()
             && addr.view_key.0 == w.view_pub_key.compress()
         {

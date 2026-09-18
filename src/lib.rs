@@ -53,10 +53,13 @@ pub mod mpc;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 
-pub use address::{Address, AddressType};
+pub use address::{
+    Address, AddressType, CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE, payment_id_from_intrinsic,
+    payment_id_to_intrinsic,
+};
 pub use error::{Error, Result};
 pub use finalized::FinalizedTx;
-pub use ftp::FinalizeTxParam;
+pub use ftp::{FinalizeTxParam, WalletBlobLayout};
 pub use inputsigner::{ClsagRequest, InputSigner, LocalInputSigner};
 pub use scan::{ReceivedOutput, ScanResult};
 pub use transfer::{RingMember, TransferDest, TransferInput, native_coin_asset_id};

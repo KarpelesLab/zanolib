@@ -167,6 +167,37 @@ impl std::fmt::Display for AddressType {
     }
 }
 
+/// `CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE`: the largest payment id that fits
+/// an output's `encrypted_payment_id`.
+pub const CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE: usize = 8;
+
+/// Converts a payment id to its intrinsic (per-output) form, as zano's
+/// `convert_payment_id` does: left-pad with zeros to 8 bytes and read as a
+/// little-endian integer. An empty payment id converts to 0.
+pub fn payment_id_to_intrinsic(payment_id: &[u8]) -> Result<u64> {
+    if payment_id.len() > CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE {
+        return Err(crate::err!(
+            "payment id is {} bytes, at most {CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE} fit in an output",
+            payment_id.len()
+        ));
+    }
+    let mut buf = [0u8; 8];
+    buf[8 - payment_id.len()..].copy_from_slice(payment_id);
+    Ok(u64::from_le_bytes(buf))
+}
+
+/// The inverse of [`payment_id_to_intrinsic`]: the 8 little-endian bytes of a
+/// non-zero intrinsic payment id, or an empty payment id for 0.
+///
+/// A payment id shorter than 8 bytes comes back left-padded with zeros, as it
+/// does from zano.
+pub fn payment_id_from_intrinsic(intrinsic: u64) -> Vec<u8> {
+    if intrinsic == 0 {
+        return Vec::new();
+    }
+    intrinsic.to_le_bytes().to_vec()
+}
+
 /// A parsed Zano address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Address {
@@ -241,6 +272,16 @@ impl Address {
             other => other,
         };
         Ok(())
+    }
+
+    /// The integrated payment id as an intrinsic (per-output) payment id, the
+    /// form HF6 transactions carry it in; 0 when the address has none.
+    ///
+    /// Fails for payment ids longer than
+    /// [`CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE`] bytes, which only fit the
+    /// legacy tx-wide attachment.
+    pub fn intrinsic_payment_id(&self) -> Result<u64> {
+        payment_id_to_intrinsic(&self.payment_id)
     }
 
     /// A compact debug rendering of the address' fields.

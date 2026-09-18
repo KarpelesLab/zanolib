@@ -7,9 +7,10 @@ use crate::base::tx::Transaction;
 use crate::base::types::Value256;
 use crate::base::variant::Variant;
 use crate::crypto::clsag::ClsagGgxInputRef;
-use crate::crypto::consts::{C_POINT_X, SC_1DIV8};
+use crate::crypto::consts::{C_POINT_X, NATIVE_COIN_ASSET_ID_PT, SC_1DIV8};
 use crate::crypto::{Point, Scalar, double_scalar_base_mult, random_scalar, scalar_int};
 use crate::error::{Error, Result};
+use crate::ftp::WalletBlobLayout;
 use crate::inputsigner::{ClsagRequest, InputSigner};
 use crate::rng::RngCore;
 
@@ -79,11 +80,16 @@ pub struct TxSource {
     pub separately_signed_tx_complete: bool,
     /// HTLC origin, for HTLC inputs.
     pub htlc_origin: String,
+    /// Unblinded source asset id (native coin for plain transfers). Part of
+    /// the blob in the current layout only; `None` serializes as the native
+    /// coin, as zano's default does.
+    pub asset_id: Option<Point>,
+    /// For gateway inputs, the source gateway address id; zero otherwise.
+    /// Part of the blob in the current layout only.
+    pub gateway_origin: Value256,
 
     // The fields below are set by the in-package transfer builder and are not
     // part of the serialized blob.
-    /// Unblinded source asset id (native coin for plain transfers).
-    pub asset_id: Option<Point>,
     /// Set when the source is a Zarcanum output, regardless of mask values.
     pub is_zc_input: bool,
     /// Public per-output scalar `Hs(8*v*R, idx)`; `secret0Xp = hi + x`.
@@ -92,6 +98,18 @@ pub struct TxSource {
 
 impl EpeeWrite for TxSource {
     fn write_epee(&self, out: &mut Vec<u8>) {
+        self.write_with(WalletBlobLayout::default(), out)
+    }
+}
+impl EpeeRead for TxSource {
+    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+        TxSource::read_with(r, WalletBlobLayout::default())
+    }
+}
+
+impl TxSource {
+    /// Serializes in the given blob layout.
+    pub fn write_with(&self, layout: WalletBlobLayout, out: &mut Vec<u8>) {
         write_vec(&self.outputs, out);
         self.real_output.write_epee(out);
         self.real_out_tx_key.write_epee(out);
@@ -105,11 +123,17 @@ impl EpeeWrite for TxSource {
         self.ms_keys_count.write_epee(out);
         self.separately_signed_tx_complete.write_epee(out);
         self.htlc_origin.write_epee(out);
+        if layout == WalletBlobLayout::Current {
+            self.asset_id
+                .unwrap_or(*NATIVE_COIN_ASSET_ID_PT)
+                .write_epee(out);
+            self.gateway_origin.write_epee(out);
+        }
     }
-}
-impl EpeeRead for TxSource {
-    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
-        Ok(TxSource {
+
+    /// Parses the given blob layout.
+    pub fn read_with(r: &mut Reader<'_>, layout: WalletBlobLayout) -> Result<Self> {
+        let mut src = TxSource {
             outputs: r.read_vec()?,
             real_output: u64::read_epee(r)?,
             real_out_tx_key: Point::read_epee(r)?,
@@ -124,9 +148,15 @@ impl EpeeRead for TxSource {
             separately_signed_tx_complete: bool::read_epee(r)?,
             htlc_origin: String::read_epee(r)?,
             asset_id: None,
+            gateway_origin: Value256::ZERO,
             is_zc_input: false,
             hi: None,
-        })
+        };
+        if layout == WalletBlobLayout::Current {
+            src.asset_id = Some(Point::read_epee(r)?);
+            src.gateway_origin = Value256::read_epee(r)?;
+        }
+        Ok(src)
     }
 }
 

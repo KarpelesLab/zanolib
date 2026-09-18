@@ -2,10 +2,11 @@
 
 use crate::base::gencontext::GenContext;
 use crate::base::ser::{EpeeRead, EpeeWrite, Reader, write_vec};
-use crate::base::types::{AccountPublicAddr, Value256};
+use crate::base::types::{AccountPublicAddr, AddressV, Value256};
 use crate::crypto::consts::{C_POINT_G, C_POINT_X, SC_1DIV8};
 use crate::crypto::{Point, Scalar, hash_to_scalar};
 use crate::error::Result;
+use crate::ftp::WalletBlobLayout;
 
 /// Domain separator for the per-output concealing point.
 pub const CRYPTO_HDS_OUT_CONCEALING_POINT: &[u8; 32] = b"ZANO_HDS_OUT_CONCEALING_POINT__\x00";
@@ -46,7 +47,7 @@ pub struct TxDest {
     /// Amount, in atomic units.
     pub amount: u64,
     /// Destination address(es); more than one means a multisig output.
-    pub addr: Vec<AccountPublicAddr>,
+    pub addr: Vec<AddressV>,
     /// Minimum signatures for a multisig output.
     pub minimum_sigs: u64,
     /// Amount provided by the initial creator of a partially-built tx.
@@ -59,12 +60,42 @@ pub struct TxDest {
     pub asset_id: Option<Point>,
     /// Destination flags.
     pub flags: u64,
+    /// Intrinsic (per-output) payment id, 0 for none. Carried in the output's
+    /// `encrypted_payment_id` from HF6 on; part of the blob in the current
+    /// layout only.
+    pub payment_id: u64,
 }
 
 impl EpeeWrite for TxDest {
     fn write_epee(&self, out: &mut Vec<u8>) {
+        self.write_with(WalletBlobLayout::default(), out)
+    }
+}
+
+impl EpeeRead for TxDest {
+    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+        TxDest::read_with(r, WalletBlobLayout::default())
+    }
+}
+
+impl TxDest {
+    /// Serializes in the given blob layout.
+    ///
+    /// The legacy layout stores untagged account addresses, so a gateway
+    /// address cannot be represented there and is written as a zero account.
+    pub fn write_with(&self, layout: WalletBlobLayout, out: &mut Vec<u8>) {
         self.amount.write_epee(out);
-        write_vec(&self.addr, out);
+        match layout {
+            WalletBlobLayout::Current => write_vec(&self.addr, out),
+            WalletBlobLayout::Legacy => {
+                let legacy: Vec<AccountPublicAddr> = self
+                    .addr
+                    .iter()
+                    .map(|a| a.as_account().copied().unwrap_or_default())
+                    .collect();
+                write_vec(&legacy, out);
+            }
+        }
         self.minimum_sigs.write_epee(out);
         self.amount_to_provide.write_epee(out);
         self.unlock_time.write_epee(out);
@@ -77,13 +108,22 @@ impl EpeeWrite for TxDest {
             None => out.extend_from_slice(&[0u8; 32]),
         }
         self.flags.write_epee(out);
+        if layout == WalletBlobLayout::Current {
+            self.payment_id.write_epee(out);
+        }
     }
-}
 
-impl EpeeRead for TxDest {
-    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+    /// Parses the given blob layout.
+    pub fn read_with(r: &mut Reader<'_>, layout: WalletBlobLayout) -> Result<Self> {
         let amount = u64::read_epee(r)?;
-        let addr = r.read_vec()?;
+        let addr = match layout {
+            WalletBlobLayout::Current => r.read_vec()?,
+            WalletBlobLayout::Legacy => r
+                .read_vec::<AccountPublicAddr>()?
+                .into_iter()
+                .map(AddressV::Account)
+                .collect(),
+        };
         let minimum_sigs = u64::read_epee(r)?;
         let amount_to_provide = u64::read_epee(r)?;
         let unlock_time = u64::read_epee(r)?;
@@ -92,6 +132,10 @@ impl EpeeRead for TxDest {
         // the Go reader did.
         let asset_id = Point::read_epee(r)?;
         let flags = u64::read_epee(r)?;
+        let payment_id = match layout {
+            WalletBlobLayout::Current => u64::read_epee(r)?,
+            WalletBlobLayout::Legacy => 0,
+        };
         Ok(TxDest {
             amount,
             addr,
@@ -101,21 +145,33 @@ impl EpeeRead for TxDest {
             htlc_options: Some(htlc_options),
             asset_id: Some(asset_id),
             flags,
+            payment_id,
         })
     }
-}
 
-impl TxDest {
+    /// The single regular account this destination pays to.
+    ///
+    /// Multisig and gateway destinations are not supported by this crate's
+    /// transaction builder and are rejected here.
+    pub fn account(&self) -> Result<&AccountPublicAddr> {
+        match self.addr.as_slice() {
+            [AddressV::Account(a)] => Ok(a),
+            [] => Err(crate::err!("destination has no address")),
+            [AddressV::Gateway(_)] => Err(crate::err!("gateway destinations are not supported")),
+            _ => Err(crate::err!("multisig destinations are not supported")),
+        }
+    }
+
     /// The one-time stealth address `h*G + spend_public_key`.
     pub fn stealth_address(&self, scalar: &Scalar) -> Result<Point> {
-        let p = crate::crypto::point_from_bytes(self.addr[0].spend_key.as_bytes())?;
+        let p = crate::crypto::point_from_bytes(self.account()?.spend_key.as_bytes())?;
         Ok(Point::mul_base(scalar).add(&p))
     }
 
     /// The concealing point `Hs(CONCEALING, h) * view_public_key`.
     pub fn concealing_point(&self, scalar: &Scalar) -> Result<Point> {
         let h = hs_domain(CRYPTO_HDS_OUT_CONCEALING_POINT, scalar);
-        let v = crate::crypto::point_from_bytes(self.addr[0].view_key.as_bytes())?;
+        let v = crate::crypto::point_from_bytes(self.account()?.view_key.as_bytes())?;
         Ok(v.mul(&h))
     }
 

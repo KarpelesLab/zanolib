@@ -15,6 +15,20 @@ pub const TRANSACTION_VERSION_PRE_HF4: u64 = 1;
 pub const TRANSACTION_VERSION_POST_HF4: u64 = 2;
 /// `TRANSACTION_VERSION_POST_HF5` — adds `hardfork_id` to the prefix.
 pub const TRANSACTION_VERSION_POST_HF5: u64 = 3;
+/// `TRANSACTION_VERSION_POST_HF6` — outputs carry a version and an encrypted
+/// payment id, and use their own variant tags.
+pub const TRANSACTION_VERSION_POST_HF6: u64 = 4;
+
+/// `CURRENCY_TX_MIN_ALLOWED_OUTS`: every non-coinbase transaction needs at
+/// least this many outputs (since HF4).
+pub const CURRENCY_TX_MIN_ALLOWED_OUTS: usize = 2;
+/// `CURRENCY_TX_MAX_ALLOWED_OUTS`: a consensus rule since HF6.
+pub const CURRENCY_TX_MAX_ALLOWED_OUTS: usize = 32;
+/// `CURRENCY_TX_MAX_ALLOWED_INPUTS`: a consensus rule since HF6.
+pub const CURRENCY_TX_MAX_ALLOWED_INPUTS: usize = 256;
+/// `CURRENCY_TX_PRACTICAL_MAX_INPUTS`: the input count zano's wallet stays
+/// under so a transaction fits the size limit.
+pub const CURRENCY_TX_PRACTICAL_MAX_INPUTS: usize = 80;
 
 /// A coinbase (generation) input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,8 +111,20 @@ impl EpeeRead for TxInZcInput {
 }
 
 /// A Zarcanum (confidential) output.
+///
+/// Two wire layouts exist, told apart by their variant tag. Transactions below
+/// [`TRANSACTION_VERSION_POST_HF6`] use `tx_out_zarcanum_v1`
+/// ([`tag::TX_OUT_ZARCANUM_V1`]), which has neither `version` nor
+/// `encrypted_payment_id`; from v4 on they use `tx_out_zarcanum`
+/// ([`tag::TX_OUT_ZARCANUM`]), which has both.
+///
+/// [`tag::TX_OUT_ZARCANUM_V1`]: super::variant::tag::TX_OUT_ZARCANUM_V1
+/// [`tag::TX_OUT_ZARCANUM`]: super::variant::tag::TX_OUT_ZARCANUM
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TxOutZarcanum {
+    /// Output format version (`TX_OUT_ZARCANUM_CURRENT_VERSION` = 0); absent
+    /// from the pre-HF6 layout.
+    pub version: u64,
     /// One-time stealth address.
     pub stealth_address: Value256,
     /// Concealing point `Q`, premultiplied by 1/8.
@@ -109,11 +135,49 @@ pub struct TxOutZarcanum {
     pub blinded_asset_id: Value256,
     /// Amount, XOR-masked with a per-output key.
     pub encrypted_amount: u64,
+    /// Payment id, XOR-masked with the same per-output key (bytes 8..16);
+    /// absent from the pre-HF6 layout. Since HF6 this is where the payment id
+    /// of an integrated address travels.
+    pub encrypted_payment_id: u64,
     /// Mixin attribute (1 = no mixing, for auditable addresses).
     pub mix_attr: u8,
 }
 
+impl TxOutZarcanum {
+    /// Writes the post-HF6 layout (`tx_out_zarcanum`).
+    pub fn write_epee_v2(&self, out: &mut Vec<u8>) {
+        append_varint(out, self.version);
+        self.stealth_address.write_epee(out);
+        self.concealing_point.write_epee(out);
+        self.amount_commitment.write_epee(out);
+        self.blinded_asset_id.write_epee(out);
+        self.encrypted_amount.write_epee(out);
+        self.encrypted_payment_id.write_epee(out);
+        out.push(self.mix_attr);
+    }
+
+    /// Reads the post-HF6 layout (`tx_out_zarcanum`).
+    pub fn read_epee_v2(r: &mut Reader<'_>) -> Result<Self> {
+        let version = r.read_varint()?;
+        if version > 0 {
+            return Err(crate::err!("unsupported tx_out_zarcanum version {version}"));
+        }
+        Ok(TxOutZarcanum {
+            version,
+            stealth_address: Value256::read_epee(r)?,
+            concealing_point: Value256::read_epee(r)?,
+            amount_commitment: Value256::read_epee(r)?,
+            blinded_asset_id: Value256::read_epee(r)?,
+            encrypted_amount: u64::read_epee(r)?,
+            encrypted_payment_id: u64::read_epee(r)?,
+            mix_attr: r.read_byte()?,
+        })
+    }
+}
+
 impl EpeeWrite for TxOutZarcanum {
+    /// Writes the pre-HF6 layout (`tx_out_zarcanum_v1`), which has no place for
+    /// `version` or `encrypted_payment_id`.
     fn write_epee(&self, out: &mut Vec<u8>) {
         self.stealth_address.write_epee(out);
         self.concealing_point.write_epee(out);
@@ -124,14 +188,97 @@ impl EpeeWrite for TxOutZarcanum {
     }
 }
 impl EpeeRead for TxOutZarcanum {
+    /// Reads the pre-HF6 layout (`tx_out_zarcanum_v1`).
     fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
         Ok(TxOutZarcanum {
+            version: 0,
             stealth_address: Value256::read_epee(r)?,
             concealing_point: Value256::read_epee(r)?,
             amount_commitment: Value256::read_epee(r)?,
             blinded_asset_id: Value256::read_epee(r)?,
             encrypted_amount: u64::read_epee(r)?,
+            encrypted_payment_id: 0,
             mix_attr: r.read_byte()?,
+        })
+    }
+}
+
+/// A gateway input (HF6): funds moved out of a gateway address.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TxInGateway {
+    /// Structure version.
+    pub version: u64,
+    /// Gateway address id.
+    pub gateway_addr: Value256,
+    /// Asset id, premultiplied by 1/8.
+    pub asset_id: Value256,
+    /// Explicit (non-confidential) amount.
+    pub amount: u64,
+}
+
+impl EpeeWrite for TxInGateway {
+    fn write_epee(&self, out: &mut Vec<u8>) {
+        append_varint(out, self.version);
+        self.gateway_addr.write_epee(out);
+        self.asset_id.write_epee(out);
+        append_varint(out, self.amount);
+        // zano serializes the version a second time here.
+        append_varint(out, self.version);
+    }
+}
+impl EpeeRead for TxInGateway {
+    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+        let version = r.read_varint()?;
+        if version > 0 {
+            return Err(crate::err!("unsupported txin_gateway version {version}"));
+        }
+        let v = TxInGateway {
+            version,
+            gateway_addr: Value256::read_epee(r)?,
+            asset_id: Value256::read_epee(r)?,
+            amount: r.read_varint()?,
+        };
+        let _version_again = r.read_varint()?;
+        Ok(v)
+    }
+}
+
+/// A gateway output (HF6): an explicit-amount payment to a gateway address.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TxOutGateway {
+    /// Structure version.
+    pub version: u64,
+    /// Gateway address id.
+    pub gateway_addr: Value256,
+    /// Asset id, premultiplied by 1/8.
+    pub asset_id: Value256,
+    /// Explicit (non-confidential) amount.
+    pub amount: u64,
+    /// Payment id, in the clear.
+    pub payment_id: u64,
+}
+
+impl EpeeWrite for TxOutGateway {
+    fn write_epee(&self, out: &mut Vec<u8>) {
+        append_varint(out, self.version);
+        self.gateway_addr.write_epee(out);
+        self.asset_id.write_epee(out);
+        append_varint(out, self.amount);
+        self.payment_id.write_epee(out);
+    }
+}
+impl EpeeRead for TxOutGateway {
+    fn read_epee(r: &mut Reader<'_>) -> Result<Self> {
+        let version = r.read_varint()?;
+        if version > 0 {
+            return Err(crate::err!("unsupported tx_out_gateway version {version}"));
+        }
+        Ok(TxOutGateway {
+            version,
+            gateway_addr: Value256::read_epee(r)?,
+            asset_id: Value256::read_epee(r)?,
+            amount: r.read_varint()?,
+            payment_id: u64::read_epee(r)?,
         })
     }
 }

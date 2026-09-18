@@ -4,11 +4,15 @@
 //! These pin the binary layout: every blob must parse, re-serialize to the exact
 //! same bytes, and hash to its known transaction id.
 
-use zanolib::base::{EpeeRead, EpeeWrite, Reader, TRANSACTION_VERSION_POST_HF5, Transaction};
+use zanolib::base::{
+    EpeeRead, EpeeWrite, Reader, TRANSACTION_VERSION_POST_HF5, TRANSACTION_VERSION_POST_HF6,
+    Transaction,
+};
 
 struct Fixture {
     name: &'static str,
     blob: &'static [u8],
+    version: u64,
     id: &'static str,
     extra: &'static [&'static str],
     vout: &'static [&'static str],
@@ -18,6 +22,7 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         name: "coinbase_v3",
         blob: include_bytes!("testdata/coinbase_v3.bin"),
+        version: TRANSACTION_VERSION_POST_HF5,
         id: "5412e0a8a4d8eb4394eeea4ec6b821c5b920f21d6c7903d3bfa4692994efea00",
         extra: &[
             "pub_key",
@@ -27,12 +32,45 @@ const FIXTURES: &[Fixture] = &[
             "derivation_hint",
             "unlock_time",
         ],
-        vout: &["tx_out_zarcanum", "tx_out_zarcanum"],
+        vout: &["tx_out_zarcanum_v1", "tx_out_zarcanum_v1"],
     },
     Fixture {
         name: "transfer_v3",
         blob: include_bytes!("testdata/transfer_v3.bin"),
+        version: TRANSACTION_VERSION_POST_HF5,
         id: "0d1dc9acc18202344a69e1a62ead03e3ae1d5fd7a316c9a6172db57accaf8d00",
+        extra: &[
+            "pub_key",
+            "etc_tx_flags16",
+            "derivation_hint",
+            "derivation_hint",
+            "zarcanum_tx_data_v1",
+        ],
+        vout: &["tx_out_zarcanum_v1", "tx_out_zarcanum_v1"],
+    },
+    // Post-HF6 (v4) transactions: outputs use the tx_out_zarcanum tag (63) and
+    // carry an encrypted payment id; every coinbase carries the cumulative
+    // block size.
+    Fixture {
+        name: "coinbase_v4",
+        blob: include_bytes!("testdata/coinbase_v4.bin"),
+        version: TRANSACTION_VERSION_POST_HF6,
+        id: "4fcd5ff79f58f1855ab3263580e6806548d2c25c995975a4ffb6970239dd6ff4",
+        extra: &[
+            "etc_coinbase_block_cumulative_size",
+            "pub_key",
+            "user_data",
+            "extra_padding",
+            "derivation_hint",
+            "derivation_hint",
+        ],
+        vout: &["tx_out_zarcanum", "tx_out_zarcanum"],
+    },
+    Fixture {
+        name: "transfer_v4",
+        blob: include_bytes!("testdata/transfer_v4.bin"),
+        version: TRANSACTION_VERSION_POST_HF6,
+        id: "1a79f343b41f69dfcc64be5386667fdce477fae766ede327a3ae8830f9d13f41",
         extra: &[
             "pub_key",
             "etc_tx_flags16",
@@ -51,7 +89,7 @@ fn on_chain_blobs_round_trip() {
         let tx = Transaction::read_epee(&mut r)
             .unwrap_or_else(|e| panic!("{}: deserialize: {e}", f.name));
         assert!(r.is_empty(), "{}: trailing bytes after deserialize", f.name);
-        assert_eq!(tx.version, TRANSACTION_VERSION_POST_HF5, "{}", f.name);
+        assert_eq!(tx.version, f.version, "{}", f.name);
 
         // Re-serializing must reproduce the exact on-chain bytes.
         let out = tx.to_epee_bytes();
@@ -110,11 +148,34 @@ fn scan_parsing_stops_before_the_signatures() {
 
 #[test]
 fn transfer_carries_a_fee_and_coinbase_does_not() {
-    let coinbase = Transaction::from_epee_bytes(FIXTURES[0].blob).unwrap();
-    let transfer = Transaction::from_epee_bytes(FIXTURES[1].blob).unwrap();
-    assert_eq!(coinbase.fee(), None);
-    assert!(transfer.fee().is_some_and(|f| f > 0));
-    assert_eq!(coinbase.zc_inputs_count(), 0);
-    assert!(transfer.zc_inputs_count() > 0);
-    assert!(coinbase.tx_pub_key().is_some());
+    for (coinbase, transfer) in [(&FIXTURES[0], &FIXTURES[1]), (&FIXTURES[2], &FIXTURES[3])] {
+        let coinbase = Transaction::from_epee_bytes(coinbase.blob).unwrap();
+        let transfer = Transaction::from_epee_bytes(transfer.blob).unwrap();
+        assert_eq!(coinbase.fee(), None);
+        assert!(transfer.fee().is_some_and(|f| f > 0));
+        assert_eq!(coinbase.zc_inputs_count(), 0);
+        assert!(transfer.zc_inputs_count() > 0);
+        assert!(coinbase.tx_pub_key().is_some());
+    }
+}
+
+#[test]
+fn post_hf6_transactions_use_the_new_output_layout() {
+    for f in FIXTURES {
+        let tx = Transaction::from_epee_bytes(f.blob).unwrap();
+        let post_hf6 = f.version >= TRANSACTION_VERSION_POST_HF6;
+        assert_eq!(tx.hardfork_id, if post_hf6 { 6 } else { 5 }, "{}", f.name);
+        for v in &tx.vout {
+            let out = v.as_tx_out_zarcanum().expect("zarcanum output");
+            assert_eq!(out.version, 0, "{}", f.name);
+            if post_hf6 {
+                // The field holds payment_id XOR mask, and the mask is
+                // overwhelmingly unlikely to be zero, so a payment-id-less
+                // output still has a non-zero value here.
+                assert_ne!(out.encrypted_payment_id, 0, "{}", f.name);
+            } else {
+                assert_eq!(out.encrypted_payment_id, 0, "{}", f.name);
+            }
+        }
+    }
 }

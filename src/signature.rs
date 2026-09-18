@@ -2,8 +2,9 @@
 
 use crate::base::gencontext::GenContext;
 use crate::base::tx::{
-    TRANSACTION_VERSION_POST_HF4, TRANSACTION_VERSION_POST_HF5, Transaction, TxInZcInput,
-    TxOutZarcanum,
+    CURRENCY_TX_MAX_ALLOWED_INPUTS, CURRENCY_TX_MAX_ALLOWED_OUTS, CURRENCY_TX_MIN_ALLOWED_OUTS,
+    TRANSACTION_VERSION_POST_HF4, TRANSACTION_VERSION_POST_HF5, TRANSACTION_VERSION_POST_HF6,
+    Transaction, TxInZcInput, TxOutZarcanum,
 };
 use crate::base::types::{KeyPair, Value256};
 use crate::base::variant::Variant;
@@ -57,12 +58,41 @@ impl Wallet {
         if ftp.spend_pub_key != self.spend_pub_key {
             return Err(Error::msg("spend key does not match"));
         }
-        // Both post-HF4 (v2) and post-HF5 (v3) transactions are supported; v3
-        // only adds a hardfork_id byte to the prefix, the crypto is identical.
-        if ftp.tx_version != TRANSACTION_VERSION_POST_HF4
-            && ftp.tx_version != TRANSACTION_VERSION_POST_HF5
-        {
-            return Err(crate::err!("unsupported tx version = {}", ftp.tx_version));
+        // Post-HF4 (v2), post-HF5 (v3) and post-HF6 (v4) transactions are
+        // supported. v3 adds a hardfork_id byte to the prefix and v4 changes
+        // the output layout (adding an encrypted payment id); for the
+        // confidential-inputs-only transactions built here the proofs are
+        // identical across all three.
+        match ftp.tx_version {
+            TRANSACTION_VERSION_POST_HF4 => {}
+            TRANSACTION_VERSION_POST_HF5 if ftp.tx_hardfork_id == 5 => {}
+            TRANSACTION_VERSION_POST_HF6 if ftp.tx_hardfork_id >= 6 => {}
+            TRANSACTION_VERSION_POST_HF5 | TRANSACTION_VERSION_POST_HF6 => {
+                return Err(crate::err!(
+                    "hardfork id {} does not match tx version {}",
+                    ftp.tx_hardfork_id,
+                    ftp.tx_version
+                ));
+            }
+            v => return Err(crate::err!("unsupported tx version = {v}")),
+        }
+        if ftp.prepared_destinations.len() < CURRENCY_TX_MIN_ALLOWED_OUTS {
+            return Err(crate::err!(
+                "a transaction needs at least {CURRENCY_TX_MIN_ALLOWED_OUTS} outputs, got {}",
+                ftp.prepared_destinations.len()
+            ));
+        }
+        if ftp.prepared_destinations.len() > CURRENCY_TX_MAX_ALLOWED_OUTS {
+            return Err(crate::err!(
+                "a transaction can have at most {CURRENCY_TX_MAX_ALLOWED_OUTS} outputs, got {}",
+                ftp.prepared_destinations.len()
+            ));
+        }
+        if ftp.sources.len() > CURRENCY_TX_MAX_ALLOWED_INPUTS {
+            return Err(crate::err!(
+                "a transaction can have at most {CURRENCY_TX_MAX_ALLOWED_INPUTS} inputs, got {}",
+                ftp.sources.len()
+            ));
         }
 
         let mut ftp = ftp.clone();
@@ -151,10 +181,8 @@ impl Wallet {
         let mut hints: BTreeSet<u16> = BTreeSet::new();
         for (i, dst) in ftp.prepared_destinations.iter().enumerate() {
             let output_index = tx.vout.len() as u64;
-            if dst.addr.is_empty() {
-                return Err(Error::msg("destination has no address"));
-            }
-            let dst_view_key = crate::crypto::point_from_bytes(dst.addr[0].view_key.as_bytes())?;
+            let dst_addr = dst.account()?;
+            let dst_view_key = crate::crypto::point_from_bytes(dst_addr.view_key.as_bytes())?;
             // d = 8 * r * V
             let derivation = generate_key_derivation(&dst_view_key, &priv_key);
             hints.insert(derivation_hint(&derivation));
@@ -168,10 +196,22 @@ impl Wallet {
             let amount_blinding_mask = hs_domain(CRYPTO_HDS_OUT_AMOUNT_BLINDING_MASK, &scalar);
             ogc.amount_blinding_masks[i] = amount_blinding_mask.clone();
 
-            let mut amount_mask_u64 = [0u8; 8];
-            amount_mask_u64.copy_from_slice(&amount_mask.to_bytes()[..8]);
+            // The amount is masked with the first 8 bytes of the mask and, from
+            // v4 on, the payment id with the next 8. A zero payment id still
+            // gets masked, so outputs without one look like any other.
+            let (amount_mask_u64, payment_id_mask_u64) = split_amount_mask(&amount_mask);
+            let encrypted_payment_id = if tx.version >= TRANSACTION_VERSION_POST_HF6 {
+                dst.payment_id ^ payment_id_mask_u64
+            } else if dst.payment_id != 0 {
+                return Err(Error::msg(
+                    "intrinsic payment ids require a post-HF6 (v4) transaction",
+                ));
+            } else {
+                0
+            };
             let mut vout = TxOutZarcanum {
-                encrypted_amount: dst.amount ^ u64::from_le_bytes(amount_mask_u64),
+                encrypted_amount: dst.amount ^ amount_mask_u64,
+                encrypted_payment_id,
                 ..Default::default()
             };
             vout.stealth_address = Value256::from_point(&dst.stealth_address(&scalar)?);
@@ -180,7 +220,7 @@ impl Wallet {
                 Value256::from_point(&dst.blinded_asset_id(&scalar, &mut ogc, i)?);
             vout.amount_commitment =
                 Value256::from_point(&dst.amount_commitment(&scalar, &mut ogc, i));
-            if dst.addr[0].flags & 1 == 1 {
+            if dst_addr.flags & 1 == 1 {
                 vout.mix_attr = 1; // CURRENCY_TO_KEY_OUT_FORCED_NO_MIX
             }
 
@@ -197,7 +237,7 @@ impl Wallet {
             let c = ogc.amount_commitments[i];
             GenContext::add_point(&mut ogc.amount_commitments_sum, &c);
 
-            tx.vout.push(Variant::TxOutZarcanum(vout));
+            tx.vout.push(Variant::tx_out_zarcanum(vout, tx.version));
         }
 
         // Pad the hint list so it never reveals how many outputs are ours.
@@ -331,4 +371,15 @@ fn sort_inputs_by_key_image(tx: &mut Transaction, ftp: &mut FinalizeTxParam) {
     if ftp.sources.len() == order.len() {
         ftp.sources = order.iter().map(|i| ftp.sources[*i].clone()).collect();
     }
+}
+
+/// Splits `Hs(AMOUNT_MASK, h)` into the 64-bit masks for the amount (bytes
+/// 0..8) and the intrinsic payment id (bytes 8..16).
+pub(crate) fn split_amount_mask(mask: &Scalar) -> (u64, u64) {
+    let b = mask.to_bytes();
+    let mut amount = [0u8; 8];
+    let mut payment_id = [0u8; 8];
+    amount.copy_from_slice(&b[..8]);
+    payment_id.copy_from_slice(&b[8..16]);
+    (u64::from_le_bytes(amount), u64::from_le_bytes(payment_id))
 }

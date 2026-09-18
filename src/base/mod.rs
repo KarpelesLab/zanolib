@@ -5,6 +5,7 @@
 //! tags, each type here implements [`EpeeWrite`]/[`EpeeRead`] explicitly, so the
 //! byte layout of every field is visible at the definition site.
 
+pub mod gateway;
 pub mod gencontext;
 pub mod ser;
 pub mod sig;
@@ -13,6 +14,11 @@ pub mod types;
 pub mod variant;
 pub mod varint;
 
+pub use gateway::{
+    GatewayAddressDescriptorBase, GatewayAddressDescriptorOperation,
+    GatewayAddressDescriptorOperationKind, GatewayEtcField, GatewayOwnerKey, GatewayOwnerSignature,
+    GatewaySig, Signature64, ZcGwBalanceProof,
+};
 pub use gencontext::GenContext;
 pub use ser::{EpeeRead, EpeeWrite, Reader, write_var_bytes, write_vec};
 pub use sig::{
@@ -20,11 +26,13 @@ pub use sig::{
     ZcBalanceProof, ZcOutsRangeProof, ZcSig,
 };
 pub use tx::{
-    TRANSACTION_VERSION_INITIAL, TRANSACTION_VERSION_POST_HF4, TRANSACTION_VERSION_POST_HF5,
-    TRANSACTION_VERSION_PRE_HF4, Transaction, TransactionPrefix, TxInGen, TxInToKey, TxInZcInput,
+    CURRENCY_TX_MAX_ALLOWED_INPUTS, CURRENCY_TX_MAX_ALLOWED_OUTS, CURRENCY_TX_MIN_ALLOWED_OUTS,
+    CURRENCY_TX_PRACTICAL_MAX_INPUTS, TRANSACTION_VERSION_INITIAL, TRANSACTION_VERSION_POST_HF4,
+    TRANSACTION_VERSION_POST_HF5, TRANSACTION_VERSION_POST_HF6, TRANSACTION_VERSION_PRE_HF4,
+    Transaction, TransactionPrefix, TxInGateway, TxInGen, TxInToKey, TxInZcInput, TxOutGateway,
     TxOutZarcanum,
 };
-pub use types::{AccountPublicAddr, KeyImageIndex, KeyPair, RefById, Value256};
+pub use types::{AccountPublicAddr, AddressV, KeyImageIndex, KeyPair, RefById, Value256};
 pub use variant::{
     ExtraAttachmentInfo, ExtraPadding, ExtraUserData, PAYMENT_ID_SERVICE_ID, SignedParts,
     TX_SERVICE_ATTACHMENT_DEFLATE_BODY, TX_SERVICE_ATTACHMENT_ENCRYPT_ADD_PROOF,

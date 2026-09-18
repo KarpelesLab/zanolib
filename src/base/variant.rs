@@ -4,9 +4,13 @@
 //! Tag values match the `SET_VARIANT_TAGS` table in zano's
 //! `src/currency_core/currency_basic.h`.
 
+use super::gateway::{GatewayAddressDescriptorOperation, GatewaySig, ZcGwBalanceProof};
 use super::ser::{EpeeRead, EpeeWrite, Reader, write_var_bytes, write_vec};
 use super::sig::{ZcAssetSurjectionProof, ZcBalanceProof, ZcOutsRangeProof, ZcSig};
-use super::tx::{TxInGen, TxInToKey, TxInZcInput, TxOutZarcanum};
+use super::tx::{
+    TRANSACTION_VERSION_POST_HF6, TxInGateway, TxInGen, TxInToKey, TxInZcInput, TxOutGateway,
+    TxOutZarcanum,
+};
 use super::types::{AccountPublicAddr, RefById, Value256};
 use super::varint::append_varint;
 use crate::error::Result;
@@ -59,8 +63,8 @@ pub mod tag {
     pub const RECEIVER: u8 = 32;
     /// `txin_zc_input`
     pub const TXIN_ZC_INPUT: u8 = 37;
-    /// `tx_out_zarcanum`
-    pub const TX_OUT_ZARCANUM: u8 = 38;
+    /// `tx_out_zarcanum_v1` — the pre-HF6 output layout.
+    pub const TX_OUT_ZARCANUM_V1: u8 = 38;
     /// `zarcanum_tx_data_v1`
     pub const ZARCANUM_TX_DATA_V1: u8 = 39;
     /// `ZC_sig`
@@ -71,6 +75,41 @@ pub mod tag {
     pub const ZC_OUTS_RANGE_PROOF: u8 = 47;
     /// `zc_balance_proof`
     pub const ZC_BALANCE_PROOF: u8 = 48;
+    /// `eth_public_key` (33 bytes)
+    pub const ETH_PUBLIC_KEY: u8 = 60;
+    /// `dummy` — a tag with no payload
+    pub const DUMMY: u8 = 62;
+    /// `tx_out_zarcanum` — the output layout used from HF6 on.
+    pub const TX_OUT_ZARCANUM: u8 = 63;
+    /// `txin_gateway`
+    pub const TXIN_GATEWAY: u8 = 65;
+    /// `tx_out_gateway`
+    pub const TX_OUT_GATEWAY: u8 = 66;
+    /// `gateway_signature`
+    pub const GATEWAY_SIG: u8 = 67;
+    /// `eddsa_signature` (64 bytes)
+    pub const EDDSA_SIGNATURE: u8 = 68;
+    /// `eddsa_public_key` (32 bytes)
+    pub const EDDSA_PUBLIC_KEY: u8 = 69;
+    /// `generic_schnorr_sig_s` (two scalars)
+    pub const GENERIC_SCHNORR_SIG_S: u8 = 70;
+    /// `eth_signature` (64 bytes)
+    pub const ETH_SIGNATURE: u8 = 71;
+    /// `account_public_address`, as used inside `address_v`
+    pub const ACCOUNT_PUBLIC_ADDRESS: u8 = 72;
+    /// `gateway_address_descriptor_operation`
+    pub const GATEWAY_ADDRESS_DESCRIPTOR_OPERATION: u8 = 73;
+    /// `gateway_address_descriptor_operation_register`
+    pub const GATEWAY_ADDRESS_DESCRIPTOR_OPERATION_REGISTER: u8 = 74;
+    /// `gateway_address_descriptor_operation_update`
+    pub const GATEWAY_ADDRESS_DESCRIPTOR_OPERATION_UPDATE: u8 = 75;
+    /// `gateway_address_ownership_proof`
+    pub const GATEWAY_ADDRESS_OWNERSHIP_PROOF: u8 = 76;
+    /// `zc_gw_balance_proof`
+    pub const ZC_GW_BALANCE_PROOF: u8 = 77;
+    /// `etc_coinbase_block_cumulative_size` — mandatory in every coinbase
+    /// since HF6.
+    pub const ETC_COINBASE_BLOCK_CUMULATIVE_SIZE: u8 = 78;
 }
 
 /// Arbitrary user data placed in tx extra (e.g. a mining pool signature).
@@ -203,8 +242,24 @@ pub enum Variant {
     Receiver(AccountPublicAddr),
     /// Zarcanum (confidential) input.
     TxInZcInput(TxInZcInput),
-    /// Zarcanum (confidential) output.
+    /// Zarcanum (confidential) output, pre-HF6 layout (tx version < 4).
+    TxOutZarcanumV1(TxOutZarcanum),
+    /// Zarcanum (confidential) output, HF6 layout (tx version >= 4).
     TxOutZarcanum(TxOutZarcanum),
+    /// Gateway input.
+    TxInGateway(TxInGateway),
+    /// Gateway output.
+    TxOutGateway(TxOutGateway),
+    /// Gateway input signature.
+    GatewaySig(GatewaySig),
+    /// Gateway address ownership proof.
+    GatewayAddressOwnershipProof(GatewaySig),
+    /// Balance proof for transactions with no confidential input.
+    ZcGwBalanceProof(ZcGwBalanceProof),
+    /// Gateway address registration/update, carried in tx extra.
+    GatewayAddressDescriptorOperation(GatewayAddressDescriptorOperation),
+    /// Cumulative block size, mandatory in every coinbase since HF6.
+    EtcCoinbaseBlockCumulativeSize(u64),
     /// Fee record.
     ZarcanumTxDataV1 {
         /// Transaction fee, in native atomic units.
@@ -247,7 +302,17 @@ impl Variant {
             Variant::Payer(_) => tag::PAYER,
             Variant::Receiver(_) => tag::RECEIVER,
             Variant::TxInZcInput(_) => tag::TXIN_ZC_INPUT,
+            Variant::TxOutZarcanumV1(_) => tag::TX_OUT_ZARCANUM_V1,
             Variant::TxOutZarcanum(_) => tag::TX_OUT_ZARCANUM,
+            Variant::TxInGateway(_) => tag::TXIN_GATEWAY,
+            Variant::TxOutGateway(_) => tag::TX_OUT_GATEWAY,
+            Variant::GatewaySig(_) => tag::GATEWAY_SIG,
+            Variant::GatewayAddressOwnershipProof(_) => tag::GATEWAY_ADDRESS_OWNERSHIP_PROOF,
+            Variant::ZcGwBalanceProof(_) => tag::ZC_GW_BALANCE_PROOF,
+            Variant::GatewayAddressDescriptorOperation(_) => {
+                tag::GATEWAY_ADDRESS_DESCRIPTOR_OPERATION
+            }
+            Variant::EtcCoinbaseBlockCumulativeSize(_) => tag::ETC_COINBASE_BLOCK_CUMULATIVE_SIZE,
             Variant::ZarcanumTxDataV1 { .. } => tag::ZARCANUM_TX_DATA_V1,
             Variant::ZcSig(_) => tag::ZC_SIG,
             Variant::ZcAssetSurjectionProof(_) => tag::ZC_ASSET_SURJECTION_PROOF,
@@ -282,7 +347,15 @@ impl Variant {
             Variant::Payer(_) => "payer2",
             Variant::Receiver(_) => "receiver2",
             Variant::TxInZcInput(_) => "txin_zc_input",
+            Variant::TxOutZarcanumV1(_) => "tx_out_zarcanum_v1",
             Variant::TxOutZarcanum(_) => "tx_out_zarcanum",
+            Variant::TxInGateway(_) => "txin_gateway",
+            Variant::TxOutGateway(_) => "tx_out_gateway",
+            Variant::GatewaySig(_) => "gateway_signature",
+            Variant::GatewayAddressOwnershipProof(_) => "gateway_address_ownership_proof",
+            Variant::ZcGwBalanceProof(_) => "zc_gw_balance_proof",
+            Variant::GatewayAddressDescriptorOperation(_) => "gateway_address_descriptor_operation",
+            Variant::EtcCoinbaseBlockCumulativeSize(_) => "etc_coinbase_block_cumulative_size",
             Variant::ZarcanumTxDataV1 { .. } => "zarcanum_tx_data_v1",
             Variant::ZcSig(_) => "ZC_sig",
             Variant::ZcAssetSurjectionProof(_) => "zc_asset_surjection_proof",
@@ -291,11 +364,21 @@ impl Variant {
         }
     }
 
-    /// Borrows the value as a Zarcanum output, if it is one.
+    /// Borrows the value as a Zarcanum output, in either layout.
     pub fn as_tx_out_zarcanum(&self) -> Option<&TxOutZarcanum> {
         match self {
-            Variant::TxOutZarcanum(v) => Some(v),
+            Variant::TxOutZarcanum(v) | Variant::TxOutZarcanumV1(v) => Some(v),
             _ => None,
+        }
+    }
+
+    /// Wraps a Zarcanum output in the layout a transaction of `tx_version`
+    /// uses.
+    pub fn tx_out_zarcanum(out: TxOutZarcanum, tx_version: u64) -> Variant {
+        if tx_version >= TRANSACTION_VERSION_POST_HF6 {
+            Variant::TxOutZarcanum(out)
+        } else {
+            Variant::TxOutZarcanumV1(out)
         }
     }
 
@@ -365,7 +448,14 @@ impl EpeeWrite for Variant {
             Variant::Uint32(v) => v.write_epee(out),
             Variant::Payer(v) | Variant::Receiver(v) => v.write_epee(out),
             Variant::TxInZcInput(v) => v.write_epee(out),
-            Variant::TxOutZarcanum(v) => v.write_epee(out),
+            Variant::TxOutZarcanumV1(v) => v.write_epee(out),
+            Variant::TxOutZarcanum(v) => v.write_epee_v2(out),
+            Variant::TxInGateway(v) => v.write_epee(out),
+            Variant::TxOutGateway(v) => v.write_epee(out),
+            Variant::GatewaySig(v) | Variant::GatewayAddressOwnershipProof(v) => v.write_epee(out),
+            Variant::ZcGwBalanceProof(v) => v.write_epee(out),
+            Variant::GatewayAddressDescriptorOperation(v) => v.write_epee(out),
+            Variant::EtcCoinbaseBlockCumulativeSize(v) => append_varint(out, *v),
             Variant::ZarcanumTxDataV1 { fee } => fee.write_epee(out),
             Variant::ZcSig(v) => v.write_epee(out),
             Variant::ZcAssetSurjectionProof(v) => v.write_epee(out),
@@ -424,7 +514,23 @@ impl EpeeRead for Variant {
             tag::PAYER => Variant::Payer(AccountPublicAddr::read_epee(r)?),
             tag::RECEIVER => Variant::Receiver(AccountPublicAddr::read_epee(r)?),
             tag::TXIN_ZC_INPUT => Variant::TxInZcInput(TxInZcInput::read_epee(r)?),
-            tag::TX_OUT_ZARCANUM => Variant::TxOutZarcanum(TxOutZarcanum::read_epee(r)?),
+            tag::TX_OUT_ZARCANUM_V1 => Variant::TxOutZarcanumV1(TxOutZarcanum::read_epee(r)?),
+            tag::TX_OUT_ZARCANUM => Variant::TxOutZarcanum(TxOutZarcanum::read_epee_v2(r)?),
+            tag::TXIN_GATEWAY => Variant::TxInGateway(TxInGateway::read_epee(r)?),
+            tag::TX_OUT_GATEWAY => Variant::TxOutGateway(TxOutGateway::read_epee(r)?),
+            tag::GATEWAY_SIG => Variant::GatewaySig(GatewaySig::read_epee(r)?),
+            tag::GATEWAY_ADDRESS_OWNERSHIP_PROOF => {
+                Variant::GatewayAddressOwnershipProof(GatewaySig::read_epee(r)?)
+            }
+            tag::ZC_GW_BALANCE_PROOF => Variant::ZcGwBalanceProof(ZcGwBalanceProof::read_epee(r)?),
+            tag::GATEWAY_ADDRESS_DESCRIPTOR_OPERATION => {
+                Variant::GatewayAddressDescriptorOperation(
+                    GatewayAddressDescriptorOperation::read_epee(r)?,
+                )
+            }
+            tag::ETC_COINBASE_BLOCK_CUMULATIVE_SIZE => {
+                Variant::EtcCoinbaseBlockCumulativeSize(r.read_varint()?)
+            }
             tag::ZARCANUM_TX_DATA_V1 => Variant::ZarcanumTxDataV1 {
                 fee: u64::read_epee(r)?,
             },
