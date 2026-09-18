@@ -111,6 +111,10 @@ pub enum AddressType {
     Audit,
     /// `aiZX` — auditable integrated address.
     AuditIntegrated,
+    /// `gwZ` — gateway address (HF6).
+    Gateway,
+    /// `gwiZ` — gateway address with a payment id (HF6).
+    GatewayIntegrated,
     /// Any other prefix, preserved verbatim.
     Unknown(u64),
 }
@@ -124,6 +128,8 @@ impl AddressType {
             AddressType::IntegratedV2 => 0x36f8,
             AddressType::Audit => 0x98c8,
             AddressType::AuditIntegrated => 0x8a49,
+            AddressType::Gateway => 0x656e,
+            AddressType::GatewayIntegrated => 0x14276e,
             AddressType::Unknown(v) => *v,
         }
     }
@@ -136,6 +142,8 @@ impl AddressType {
             0x36f8 => AddressType::IntegratedV2,
             0x98c8 => AddressType::Audit,
             0x8a49 => AddressType::AuditIntegrated,
+            0x656e => AddressType::Gateway,
+            0x14276e => AddressType::GatewayIntegrated,
             other => AddressType::Unknown(other),
         }
     }
@@ -143,6 +151,12 @@ impl AddressType {
     /// Whether this is an auditable address.
     pub fn auditable(&self) -> bool {
         matches!(self, AddressType::Audit | AddressType::AuditIntegrated)
+    }
+
+    /// Whether this is a gateway address, which names a gateway address id
+    /// rather than a spend/view key pair.
+    pub fn is_gateway(&self) -> bool {
+        matches!(self, AddressType::Gateway | AddressType::GatewayIntegrated)
     }
 
     /// Whether the encoding carries a flags byte.
@@ -162,6 +176,8 @@ impl std::fmt::Display for AddressType {
             AddressType::IntegratedV2 => f.write_str("Integrated Address V2 (iZ)"),
             AddressType::Audit => f.write_str("Audit Address (aZx)"),
             AddressType::AuditIntegrated => f.write_str("Audit Integrated Address (aiZX)"),
+            AddressType::Gateway => f.write_str("Gateway Address (gwZ)"),
+            AddressType::GatewayIntegrated => f.write_str("Integrated Gateway Address (gwiZ)"),
             AddressType::Unknown(v) => write!(f, "Unknown Address type ({v:x})"),
         }
     }
@@ -199,15 +215,19 @@ pub fn payment_id_from_intrinsic(intrinsic: u64) -> Vec<u8> {
 }
 
 /// A parsed Zano address.
+///
+/// For a gateway address ([`AddressType::is_gateway`]) `spend_key` holds the
+/// 32-byte gateway address id, `view_key` is empty and `payment_id`, if any,
+/// is the 8 little-endian bytes of its intrinsic payment id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Address {
     /// The address type.
     pub typ: AddressType,
     /// Address flags (bit 0 = auditable).
     pub flags: u8,
-    /// Public spend key (32 bytes).
+    /// Public spend key (32 bytes), or the gateway address id.
     pub spend_key: Vec<u8>,
-    /// Public view key (32 bytes).
+    /// Public view key (32 bytes); empty for gateway addresses.
     pub view_key: Vec<u8>,
     /// Integrated payment id, if any.
     pub payment_id: Vec<u8>,
@@ -217,7 +237,7 @@ impl Address {
     /// Parses a base58 Zano address, verifying its checksum.
     pub fn parse(addr: &str) -> Result<Address> {
         let payload = base58_decode_chunked(addr)?;
-        if payload.len() < 64 + 4 {
+        if payload.len() < 4 + 1 {
             return Err(Error::msg("address is too short"));
         }
         let (body, cksum) = payload.split_at(payload.len() - 4);
@@ -226,10 +246,13 @@ impl Address {
         }
 
         let (typ_prefix, rest) = take_varint(body)?;
+        let typ = AddressType::from_prefix(typ_prefix);
+        if typ.is_gateway() {
+            return Address::parse_gateway(typ, rest);
+        }
         if rest.len() < 64 {
             return Err(Error::msg("address is too short"));
         }
-        let typ = AddressType::from_prefix(typ_prefix);
         let mut res = Address {
             typ,
             flags: 0,
@@ -249,8 +272,52 @@ impl Address {
         Ok(res)
     }
 
+    /// Parses the body of a gateway address (`gateway_address_serialized_to_str`):
+    /// a version, the gateway address id and an optional 64-bit payment id.
+    fn parse_gateway(typ: AddressType, body: &[u8]) -> Result<Address> {
+        let (version, rest) = take_varint(body)?;
+        if version != 0 {
+            return Err(crate::err!("unsupported gateway address version {version}"));
+        }
+        if rest.len() < 32 + 1 {
+            return Err(Error::msg("gateway address is too short"));
+        }
+        let (id, rest) = rest.split_at(32);
+        // boost::optional: an "is none" flag, then the value if present.
+        let payment_id = match rest {
+            [1] => Vec::new(),
+            [0, pid @ ..] if pid.len() == 8 => pid.to_vec(),
+            _ => return Err(Error::msg("malformed gateway address payment id")),
+        };
+        if (typ == AddressType::GatewayIntegrated) == payment_id.is_empty() {
+            return Err(Error::msg(
+                "gateway address type does not match its payment id",
+            ));
+        }
+        Ok(Address {
+            typ,
+            flags: 0,
+            spend_key: id.to_vec(),
+            view_key: Vec::new(),
+            payment_id,
+        })
+    }
+
+    /// The gateway address id, for a gateway address.
+    pub fn gateway_id(&self) -> Option<crate::base::Value256> {
+        if !self.typ.is_gateway() {
+            return None;
+        }
+        let id: [u8; 32] = self.spend_key.as_slice().try_into().ok()?;
+        Some(crate::base::Value256(id))
+    }
+
     /// Sets (or clears, when empty) the integrated payment id, adjusting the
     /// address type accordingly.
+    ///
+    /// Gateway addresses only take payment ids of up to
+    /// [`CURRENCY_HF6_INTRINSIC_PAYMENT_ID_SIZE`] bytes; they are stored as
+    /// the 8 little-endian bytes of the intrinsic value, as zano does.
     pub fn set_payment_id(&mut self, payment_id: &[u8]) -> Result<()> {
         if payment_id.len() > 128 {
             return Err(Error::msg("payment id is too long"));
@@ -260,8 +327,15 @@ impl Address {
             self.typ = match self.typ {
                 AddressType::IntegratedV1 | AddressType::IntegratedV2 => AddressType::Public,
                 AddressType::AuditIntegrated => AddressType::Audit,
+                AddressType::GatewayIntegrated => AddressType::Gateway,
                 other => other,
             };
+            return Ok(());
+        }
+        if self.typ.is_gateway() {
+            let intrinsic = payment_id_to_intrinsic(payment_id)?;
+            self.payment_id = intrinsic.to_le_bytes().to_vec();
+            self.typ = AddressType::GatewayIntegrated;
             return Ok(());
         }
         self.payment_id = payment_id.to_vec();
@@ -301,6 +375,20 @@ impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::new();
         append_varint(&mut buf, self.typ.prefix());
+        if self.typ.is_gateway() {
+            append_varint(&mut buf, 0); // gateway_address_serialized_to_str version
+            buf.extend_from_slice(&self.spend_key);
+            if self.payment_id.is_empty() {
+                buf.push(1); // optional payment id: none
+            } else {
+                buf.push(0);
+                let pid = payment_id_to_intrinsic(&self.payment_id).map_err(|_| std::fmt::Error)?;
+                buf.extend_from_slice(&pid.to_le_bytes());
+            }
+            let cksum = keccak256(&buf);
+            buf.extend_from_slice(&cksum[..4]);
+            return f.write_str(&base58_encode_chunked(&buf));
+        }
         buf.extend_from_slice(&self.spend_key);
         buf.extend_from_slice(&self.view_key);
         match self.typ {
@@ -503,6 +591,32 @@ mod tests {
         assert_eq!(parsed.flags, 1);
         assert_eq!(parsed.typ, AddressType::Audit);
         assert!(parsed.typ.auditable());
+    }
+
+    #[test]
+    fn gateway_addresses_parse_and_reencode() {
+        // The example address from zano's RPC documentation.
+        let s = "gwZ5sqZkre33rxhoo9ht5xcmzy5khvr2hFSfvk7TeXeMXxby7acC3fs1D";
+        let addr = Address::parse(s).unwrap();
+        assert_eq!(addr.typ, AddressType::Gateway);
+        assert!(addr.typ.is_gateway());
+        assert!(addr.gateway_id().is_some());
+        assert!(addr.view_key.is_empty() && addr.payment_id.is_empty());
+        assert_eq!(addr.to_string(), s);
+
+        // Adding a payment id makes it an integrated gateway address.
+        let mut integ = addr.clone();
+        integ.set_payment_id(&[0xaa, 0xbb]).unwrap();
+        assert_eq!(integ.typ, AddressType::GatewayIntegrated);
+        let encoded = integ.to_string();
+        assert!(encoded.starts_with("gwiZ"), "{encoded}");
+        let back = Address::parse(&encoded).unwrap();
+        assert_eq!(back, integ);
+        assert_eq!(back.intrinsic_payment_id().unwrap(), 0xbbaa_0000_0000_0000);
+        assert!(integ.clone().set_payment_id(&[0u8; 9]).is_err());
+
+        integ.set_payment_id(&[]).unwrap();
+        assert_eq!(integ, addr);
     }
 
     #[test]

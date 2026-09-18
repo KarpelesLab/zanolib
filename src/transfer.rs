@@ -204,6 +204,9 @@ impl Wallet {
         }
 
         for d in dests {
+            if d.address.typ.is_gateway() {
+                return Err(Error::msg("sending to gateway addresses is not supported"));
+            }
             let asset_pt = d
                 .asset_id
                 .to_point()

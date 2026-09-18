@@ -49,11 +49,11 @@ Addresses, wallets, scanning and signing live at the crate root.
 
 ## Offline Signatures
 
-Compatible Zano version: **2.1.0.382** – **2.1.19.477** (the ZC→ZC transaction format is unchanged across this range)
+Compatible Zano version: **2.1.0.382** – **2.2.2.513**. Transactions are built as v2 (post-HF4), v3 (post-HF5) or v4 (post-HF6, required on mainnet since height 3,833,000) depending on the version the blob asks for.
 
 This library allows loading unsigned transactions produced by a view-only simplewallet and signing them offline. There are a few caveats:
 
-- The unsigned transaction is a binary format **not** meant to be portable — it only works between specific versions of Zano. This library is tested against the versions above and may not work with newer versions. Blob files aren't versioned so structure changes cannot be detected automatically.
+- The unsigned transaction is a binary format **not** meant to be portable — it only works between specific versions of Zano. Blob files aren't versioned, so structure changes cannot be detected from a version field. Two layouts are supported: the current one (Zano 2.2, whose sources carry an asset id and gateway origin, and whose destinations carry tagged addresses and an intrinsic payment id) and the older one; parsing tries the current layout first and falls back to the older one.
 - For now this library only supports ZC→ZC transactions.
 
 ### Usage
@@ -109,7 +109,7 @@ res?;
 
 Notes:
 
-- **Attribution**: give each user a distinct integrated address; `d.payment_id` maps a deposit back to the user. Per-wallet addresses work too (then payment IDs are simply absent).
+- **Attribution**: give each user a distinct integrated address; `d.payment_id` maps a deposit back to the user. Per-wallet addresses work too (then payment IDs are simply absent). Since HF6 an integrated address' payment ID (up to 8 bytes) travels inside each output rather than in a tx-wide attachment, so it is reported per output (`d.out.payment_id`); `d.payment_id` gives the tx-wide one when present and the output's own otherwise, and is returned as the 8 little-endian bytes Zano uses.
 - **Assets**: native ZANO and confidential assets are both decoded; `d.out.asset_id` / `d.out.is_native` identify which.
 - **Confirmations / reorgs**: scan only finalized heights and re-scan a small tail on restart. Mempool (0-conf) scanning and spent/key-image tracking are not included.
 
@@ -134,7 +134,9 @@ let res = client.sweep_to(
 // res.status == Some("OK") once accepted into the mempool
 ```
 
-For finer control, `Wallet::build_transfer` assembles and signs an arbitrary set of `TransferInput`s and `TransferDest`s (you supply the decoy rings), returning a ready-to-serialize transaction. Native ZANO and confidential assets can be mixed in a single transaction; the fee is the native surplus and every non-native asset must balance.
+`sweep_to` picks the transaction version from the chain height (v4 since HF6), carries the recipient's payment ID when sending to an integrated address, requires every deposit to have at least 10 confirmations (Zano's coinage rule), and accepts at most 80 deposits per transaction (split larger sweeps). Decoys the daemon refuses (spent, locked or non-mixable outputs) are replaced automatically.
+
+For finer control, `Wallet::build_transfer` assembles and signs an arbitrary set of `TransferInput`s and `TransferDest`s (you supply the decoy rings), returning a ready-to-serialize transaction. Native ZANO and confidential assets can be mixed in a single transaction; the fee is the native surplus and every non-native asset must balance. A transaction needs at least two outputs, so a single destination is split into two outputs to the same recipient. Gateway addresses (`gwZ…`, HF6) can be parsed but not paid to.
 
 ### Roadmap / not yet implemented
 
@@ -142,7 +144,8 @@ The sending path currently spends an explicit, caller-provided set of deposits. 
 
 - **Automatic coin/input selection** — pick which deposits to spend for a target amount (per asset), instead of requiring the caller to choose.
 - **Change splitting** — produce change outputs (and sensible output splitting) rather than requiring inputs to sum exactly to outputs + fee.
-- **Payment IDs on outgoing transactions** — attach an (encrypted) integrated-address payment ID when sending, not just recover it when scanning.
+- **Long payment IDs on outgoing transactions** — payment IDs of up to 8 bytes travel inside the outputs; longer ones would need the legacy encrypted tx-wide attachment, which is not built.
+- **Gateway transfers** — sending to or from HF6 gateway addresses (explicit-amount `tx_out_gateway` / `txin_gateway`). Such transactions are parsed, but not built.
 - **Gamma decoy distribution** — match Zano's `decoy_selection_generator` gamma curve for ring members; the current selection samples uniformly below the real output's index (valid, but not privacy-optimal).
 
 ## Threshold signing (MPC)
