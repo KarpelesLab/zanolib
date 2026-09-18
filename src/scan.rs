@@ -1,14 +1,19 @@
 //! Receive-side scanning: detecting and decoding outputs paid to a wallet.
 
-use crate::base::tx::{Transaction, TxOutZarcanum};
+use crate::address::payment_id_from_intrinsic;
+use crate::base::tx::{TRANSACTION_VERSION_POST_HF6, Transaction, TxOutZarcanum};
 use crate::base::types::Value256;
-use crate::base::variant::{PAYMENT_ID_SERVICE_ID, TX_SERVICE_ATTACHMENT_ENCRYPT_BODY, Variant};
+use crate::base::variant::{
+    PAYMENT_ID_SERVICE_ID, TX_SERVICE_ATTACHMENT_ENCRYPT_BODY,
+    TX_SERVICE_ATTACHMENT_ENCRYPT_BODY_ISOLATE_AUDITABLE, Variant,
+};
 use crate::crypto::consts::{C_POINT_G, C_POINT_X, NATIVE_COIN_ASSET_ID_PT};
 use crate::crypto::{
-    Point, Scalar, chacha8, chacha8_generate_key, generate_key_derivation, hash_to_scalar, mul8,
-    scalar_int,
+    Point, Scalar, chacha_generate_key_and_iv, chacha8, chacha8_generate_key, chacha20,
+    generate_key_derivation, hash_to_scalar, mul8, scalar_int,
 };
 use crate::error::{Error, Result};
+use crate::signature::split_amount_mask;
 use crate::txdest::{
     CRYPTO_HDS_OUT_AMOUNT_BLINDING_MASK, CRYPTO_HDS_OUT_AMOUNT_MASK,
     CRYPTO_HDS_OUT_ASSET_BLIND_MASK, CRYPTO_HDS_OUT_CONCEALING_POINT, hs_domain,
@@ -38,6 +43,11 @@ pub struct ReceivedOutput {
     /// Asset id blinding mask, hex-encoded in JSON.
     #[serde(with = "hex_scalar")]
     pub asset_id_blinding_mask: Scalar,
+    /// The intrinsic payment id carried by this output (post-HF6
+    /// transactions), as the 8 little-endian bytes zano reports; `None` when
+    /// the output has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payment_id: Option<Vec<u8>>,
 }
 
 /// The outputs of one transaction that belong to the wallet.
@@ -47,7 +57,8 @@ pub struct ScanResult {
     pub tx_pub_key: Value256,
     /// The outputs paid to this wallet.
     pub outputs: Vec<ReceivedOutput>,
-    /// The decrypted integrated-address payment id, if the tx carried one.
+    /// The decrypted tx-wide payment id (the legacy `"P"` service
+    /// attachment), if the tx carried one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payment_id: Option<Vec<u8>>,
 }
@@ -57,7 +68,18 @@ impl ScanResult {
     pub fn found(&self) -> bool {
         !self.outputs.is_empty()
     }
+
+    /// The payment id an output was received with, following zano's wallet:
+    /// a tx-wide payment id applies to every output and takes precedence;
+    /// otherwise each output carries its own intrinsic payment id (HF6).
+    pub fn payment_id_for(&self, out: &ReceivedOutput) -> Option<Vec<u8>> {
+        self.payment_id.clone().or_else(|| out.payment_id.clone())
+    }
 }
+
+/// `CRYPTO_HDS_CHACHA_TX_PAYLOAD_ITEMS`: the key/IV domain for post-HF6
+/// payload item encryption.
+const CRYPTO_HDS_CHACHA_TX_PAYLOAD_ITEMS: &[u8; 32] = b"ZANO_HDS_CHACHA_TX_PAYLOAD_ITEM\x00";
 
 /// Hex (de)serialization for scalars in JSON.
 mod hex_scalar {
@@ -82,16 +104,30 @@ mod hex_scalar {
 
 impl Wallet {
     /// Returns the outputs of `tx` that belong to this wallet, decoding each
-    /// one's amount and asset id, plus the decrypted payment id if present.
+    /// one's amount, asset id and intrinsic payment id, plus the decrypted
+    /// tx-wide payment id if present.
     ///
     /// Only the view secret key is required, so this works for view-only
     /// wallets. A transaction with no tx public key, or none of whose outputs
     /// are ours, yields an empty result rather than an error.
     ///
+    /// Like zano's wallet, this ignores the outputs of non-coinbase
+    /// transactions that carry an unlock time: they cannot be spent when
+    /// expected, and HF6 forbids such transactions altogether.
+    ///
     /// This mirrors `currency::lookup_acc_outs` /
     /// `decode_output_amount_and_asset_id`.
     pub fn scan_tx(&self, tx: &Transaction) -> Result<ScanResult> {
         let mut res = ScanResult::default();
+
+        let is_coinbase = tx.vin.iter().any(|v| matches!(v, Variant::Gen(_)));
+        let has_unlock_time = tx
+            .extra
+            .iter()
+            .any(|e| matches!(e, Variant::UnlockTime(_) | Variant::UnlockTime2(_)));
+        if !is_coinbase && has_unlock_time {
+            return Ok(res);
+        }
 
         let Some(tx_pub) = tx.tx_pub_key() else {
             return Ok(res); // no tx pub key => nothing addressed to us
@@ -132,11 +168,16 @@ impl Wallet {
     /// Decodes an output already confirmed to be ours, recovering the amount and
     /// asset id and validating the amount commitment and concealing point.
     fn decode_output(&self, i: usize, zo: &TxOutZarcanum, h: &Scalar) -> Result<ReceivedOutput> {
-        // amount = encrypted_amount XOR Hs(AMOUNT_MASK, h)[:8]
-        let amount_mask = hs_domain(CRYPTO_HDS_OUT_AMOUNT_MASK, h);
-        let mut mask8 = [0u8; 8];
-        mask8.copy_from_slice(&amount_mask.to_bytes()[..8]);
-        let amount = zo.encrypted_amount ^ u64::from_le_bytes(mask8);
+        // amount = encrypted_amount XOR Hs(AMOUNT_MASK, h)[0..8], and since HF6
+        // payment_id = encrypted_payment_id XOR Hs(AMOUNT_MASK, h)[8..16]. A
+        // zero field means "no payment id" (pre-HF6 outputs always read as 0).
+        let (amount_mask, payment_id_mask) =
+            split_amount_mask(&hs_domain(CRYPTO_HDS_OUT_AMOUNT_MASK, h));
+        let amount = zo.encrypted_amount ^ amount_mask;
+        let payment_id = match zo.encrypted_payment_id {
+            0 => None,
+            enc => Some(payment_id_from_intrinsic(enc ^ payment_id_mask)).filter(|p| !p.is_empty()),
+        };
 
         let amount_blinding_mask = hs_domain(CRYPTO_HDS_OUT_AMOUNT_BLINDING_MASK, h);
 
@@ -196,12 +237,17 @@ impl Wallet {
             stealth_address: zo.stealth_address,
             amount_blinding_mask,
             asset_id_blinding_mask,
+            payment_id,
         })
     }
 
-    /// Finds the payment-id service attachment (`service_id == "P"`) and
-    /// decrypts its body with the income key derivation.
-    fn recover_payment_id(&self, tx: &Transaction, derivation_bytes: &[u8]) -> Option<Vec<u8>> {
+    /// Finds the tx-wide payment-id service attachment (`service_id == "P"`)
+    /// and decrypts its body with the income key derivation.
+    fn recover_payment_id(&self, tx: &Transaction, derivation_bytes: &[u8; 32]) -> Option<Vec<u8>> {
+        if tx.version >= TRANSACTION_VERSION_POST_HF6 {
+            return recover_payment_id_hf6(tx, derivation_bytes);
+        }
+
         let find = |items: &[Variant]| -> Option<crate::base::variant::TxServiceAttachment> {
             items
                 .iter()
@@ -220,4 +266,41 @@ impl Wallet {
         }
         Some(body)
     }
+}
+
+/// Post-HF6 payload decryption (`decrypt_payload_items_visitor`): every
+/// encrypted item in extra, then in the attachments, is ChaCha20-encrypted
+/// under one key, with an IV that starts from the derived value and is
+/// incremented (as a little-endian `u64`) after each encrypted item. Comments
+/// are always encrypted; service attachments only with `ENCRYPT_BODY`.
+///
+/// Bodies encrypted with `ENCRYPT_BODY_ISOLATE_AUDITABLE` need the spend secret
+/// key and are skipped, as zano's view-only wallets do.
+fn recover_payment_id_hf6(tx: &Transaction, derivation_bytes: &[u8; 32]) -> Option<Vec<u8>> {
+    let (key, iv) =
+        chacha_generate_key_and_iv(CRYPTO_HDS_CHACHA_TX_PAYLOAD_ITEMS, derivation_bytes, 0);
+    let mut iv = u64::from_le_bytes(iv);
+    for item in tx.extra.iter().chain(&tx.attachment) {
+        let this_iv = iv;
+        match item {
+            Variant::Comment(_) => iv = iv.wrapping_add(1),
+            Variant::ServiceAttachment(sa) => {
+                if sa.flags & TX_SERVICE_ATTACHMENT_ENCRYPT_BODY != 0 {
+                    iv = iv.wrapping_add(1);
+                }
+                if sa.service_id != PAYMENT_ID_SERVICE_ID {
+                    continue;
+                }
+                if sa.flags & TX_SERVICE_ATTACHMENT_ENCRYPT_BODY == 0 {
+                    return Some(sa.body.clone());
+                }
+                if sa.flags & TX_SERVICE_ATTACHMENT_ENCRYPT_BODY_ISOLATE_AUDITABLE != 0 {
+                    return None;
+                }
+                return chacha20(&key, &this_iv.to_le_bytes(), &sa.body).ok();
+            }
+            _ => {}
+        }
+    }
+    None
 }

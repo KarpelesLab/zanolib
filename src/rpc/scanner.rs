@@ -17,7 +17,8 @@ pub struct Deposit {
     pub tx_pub_key: Value256,
     /// Chain-assigned global output index (0 if unavailable).
     pub global_index: u64,
-    /// Integrated-address payment id, if the transaction carried one.
+    /// Integrated-address payment id this output was received with, if any:
+    /// the tx-wide one when present, else the output's own intrinsic one.
     pub payment_id: Option<Vec<u8>>,
     /// The decoded output.
     pub out: ReceivedOutput,
@@ -137,7 +138,7 @@ impl Scanner {
                 .wallet
                 .scan_tx(&tx)
                 .map_err(|e| crate::err!("block {} tx {}: scan: {e}", blk.height, txb.id))?;
-            for out in res.outputs {
+            for out in &res.outputs {
                 let global_index = td
                     .outs
                     .get(out.output_index)
@@ -148,8 +149,8 @@ impl Scanner {
                     tx_id: txb.id.clone(),
                     tx_pub_key: res.tx_pub_key,
                     global_index,
-                    payment_id: res.payment_id.clone(),
-                    out,
+                    payment_id: res.payment_id_for(out),
+                    out: out.clone(),
                 })?;
             }
         }

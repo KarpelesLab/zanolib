@@ -5,7 +5,7 @@
 //! `src/currency_core/currency_basic.h`.
 
 use super::gateway::{GatewayAddressDescriptorOperation, GatewaySig, ZcGwBalanceProof};
-use super::ser::{EpeeRead, EpeeWrite, Reader, write_var_bytes, write_vec};
+use super::ser::{EpeeRead, EpeeWrite, MAX_VEC_LEN, Reader, write_var_bytes, write_vec};
 use super::sig::{ZcAssetSurjectionProof, ZcBalanceProof, ZcOutsRangeProof, ZcSig};
 use super::tx::{
     TRANSACTION_VERSION_POST_HF6, TxInGateway, TxInGen, TxInToKey, TxInZcInput, TxOutGateway,
@@ -57,6 +57,8 @@ pub mod tag {
     pub const ETC_TX_TIME: u8 = 27;
     /// bare `uint32_t`
     pub const UINT32: u8 = 28;
+    /// `etc_tx_details_unlock_time2` — per-output unlock times
+    pub const UNLOCK_TIME2: u8 = 30;
     /// `tx_payer`
     pub const PAYER: u8 = 31;
     /// `tx_receiver`
@@ -210,6 +212,8 @@ pub enum Variant {
     ServiceAttachment(TxServiceAttachment),
     /// Global unlock time.
     UnlockTime(u64),
+    /// Per-output unlock times.
+    UnlockTime2(Vec<u64>),
     /// Transaction expiration time.
     ExpirationTime(u64),
     /// Transaction flags.
@@ -286,6 +290,7 @@ impl Variant {
             Variant::DerivationHint(_) => tag::DERIVATION_HINT,
             Variant::ServiceAttachment(_) => tag::SERVICE_ATTACHMENT,
             Variant::UnlockTime(_) => tag::UNLOCK_TIME,
+            Variant::UnlockTime2(_) => tag::UNLOCK_TIME2,
             Variant::ExpirationTime(_) => tag::EXPIRATION_TIME,
             Variant::TxFlags(_) => tag::TX_FLAGS,
             Variant::SignedParts(_) => tag::SIGNED_PARTS,
@@ -331,6 +336,7 @@ impl Variant {
             Variant::DerivationHint(_) => "derivation_hint",
             Variant::ServiceAttachment(_) => "attachment",
             Variant::UnlockTime(_) => "unlock_time",
+            Variant::UnlockTime2(_) => "unlock_time2",
             Variant::ExpirationTime(_) => "expiration_time",
             Variant::TxFlags(_) => "flags",
             Variant::SignedParts(_) => "signed_outs",
@@ -430,6 +436,12 @@ impl EpeeWrite for Variant {
             | Variant::ExpirationTime(v)
             | Variant::TxFlags(v)
             | Variant::EtcTxTime(v) => append_varint(out, *v),
+            Variant::UnlockTime2(v) => {
+                append_varint(out, v.len() as u64);
+                for t in v {
+                    append_varint(out, *t);
+                }
+            }
             Variant::SignedParts(v) => {
                 append_varint(out, v.n_outs);
                 append_varint(out, v.n_extras);
@@ -487,6 +499,17 @@ impl EpeeRead for Variant {
                 flags: r.read_byte()?,
             }),
             tag::UNLOCK_TIME => Variant::UnlockTime(r.read_varint()?),
+            tag::UNLOCK_TIME2 => {
+                let n = r.read_varint()?;
+                if n > MAX_VEC_LEN {
+                    return Err(crate::err!("unlock_time2 too large: {n}"));
+                }
+                let mut v = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    v.push(r.read_varint()?);
+                }
+                Variant::UnlockTime2(v)
+            }
             tag::EXPIRATION_TIME => Variant::ExpirationTime(r.read_varint()?),
             tag::TX_FLAGS => Variant::TxFlags(r.read_varint()?),
             tag::SIGNED_PARTS => Variant::SignedParts(SignedParts {

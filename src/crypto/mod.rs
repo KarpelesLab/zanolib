@@ -25,7 +25,7 @@ pub use purecrypto::ec::edwards25519::hazmat::{EdwardsPoint as Point, Scalar};
 
 pub use bge::generate_bge_proof;
 pub use bpp::{TRAIT_ZARCANUM, TRAIT_ZC_OUT, Trait};
-pub use chacha8::{chacha8, chacha8_generate_key};
+pub use chacha8::{chacha_generate_key_and_iv, chacha8, chacha8_generate_key, chacha20};
 pub use clsag::{ClsagGgxInputRef, generate_clsag_ggx, verify_clsag_ggx};
 pub use consts::*;
 pub use derive::{
